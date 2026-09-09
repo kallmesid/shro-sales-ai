@@ -63,6 +63,7 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
 
   // File Upload State
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [deletingAttachmentId, setDeletingAttachmentId] = useState<number | null>(null);
   const [parsingPdf, setParsingPdf] = useState(false);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
@@ -343,6 +344,24 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
     } finally {
       setUploadingAttachment(false);
       e.target.value = '';
+    }
+  };
+
+  const handleDeleteAttachment = async (fileId: number, fileName: string) => {
+    if (!confirm(`Are you sure you want to delete "${fileName}"?`)) return;
+    setDeletingAttachmentId(fileId);
+    try {
+      await apiRequest(`/api/uploads/attachment/${fileId}`, {
+        method: 'DELETE',
+      });
+      setSuccessMsg('Attachment deleted successfully.');
+      if (fullCostSheet?.id) {
+        loadCostSheet(fullCostSheet.id);
+      }
+    } catch (err: any) {
+      alert('Failed to delete attachment: ' + err.message);
+    } finally {
+      setDeletingAttachmentId(null);
     }
   };
 
@@ -1240,15 +1259,26 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
                                 <td className="p-2.5 text-slate-500">
                                   {new Date(f.uploaded_at).toLocaleDateString('en-GB')}
                                 </td>
-                                <td className="p-2.5 text-right">
-                                  <a
-                                    href={f.file_path}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="px-2.5 py-1 text-blue-600 hover:bg-blue-50 rounded font-semibold text-xs transition"
-                                  >
-                                    View / Download
-                                  </a>
+                                <td className="p-2.5 text-right whitespace-nowrap">
+                                  <div className="inline-flex items-center gap-1.5 justify-end">
+                                    <a
+                                      href={f.file_path}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="px-2.5 py-1 text-blue-600 hover:bg-blue-50 rounded font-semibold text-xs transition"
+                                    >
+                                      View / Download
+                                    </a>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteAttachment(f.id, f.original_name)}
+                                      disabled={deletingAttachmentId === f.id}
+                                      className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                                      title={`Delete ${f.original_name}`}
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))

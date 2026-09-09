@@ -1,8 +1,11 @@
 import { Response } from 'express';
+import path from 'path';
+import fs from 'fs';
 import { query } from '../config/db.ts';
 import { AuthRequest } from '../middleware/auth.ts';
 import { broadcastCostSheetUpdate, sendUserNotification } from '../services/socketService.ts';
 import { sendApprovalRequestEmail, sendDecisionNotificationEmail } from '../services/emailService.ts';
+import { sanitizeFolderName } from './uploadController.ts';
 
 export const STAGE_NAMES: { [key: number]: string } = {
   1: 'Finance 1 (Initial check)',
@@ -814,6 +817,18 @@ export async function deleteCostSheet(req: AuthRequest, res: Response) {
     }
 
     await query('DELETE FROM cost_sheets WHERE id = $1', [id]);
+
+    // Clean up physical files and folder from disk
+    try {
+      const folderName = sanitizeFolderName(sheet.cs_number || `CS-ID-${sheet.id}`);
+      const sheetDir = path.join(process.cwd(), 'uploads', folderName);
+      if (fs.existsSync(sheetDir)) {
+        fs.rmSync(sheetDir, { recursive: true, force: true });
+      }
+    } catch (cleanupErr) {
+      console.warn('Failed to clean up cost sheet files on disk:', cleanupErr);
+    }
+
     return res.json({ message: 'Cost sheet deleted successfully' });
   } catch (error) {
     console.error('Error deleting cost sheet:', error);

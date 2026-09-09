@@ -369,6 +369,68 @@ The email notification service (`server/services/emailService.ts`) triggers noti
 
 ---
 
+## 📁 File Organization & Disaster Recovery Backups
+
+Uploaded documents (vendor quotes, BOM spec sheets, customer purchase orders, technical diagrams) are organized on disk by **Cost Sheet**:
+
+```text
+uploads/
+├── .temp/                           # Temporary buffer during active upload streams
+├── SHRO_2026-27_001/                # Cost sheet specific directory
+│   ├── Cisco_Catalyst_Quote.pdf     # Clean, human-readable document names
+│   ├── Switch_BOM_Specs.xlsx
+│   ├── deal-info.txt                # Plaintext manifest with deal metadata & document list
+│   └── deal-metadata.json           # Machine-readable JSON backup for automated pipelines
+├── SHRO_2026-27_002/
+│   ├── Fortinet_Security_Appliance.pdf
+│   ├── deal-info.txt
+│   └── deal-metadata.json
+```
+
+### Key Advantages for IT & System Administrators:
+1. **Instant Offline Disaster Recovery**: In backup or audit scenarios, you do not need the database or web application to find quotes. Simply browse into `uploads/<Cost_Sheet_Number>/` to retrieve any file directly.
+2. **Plaintext Archive Manifest (`deal-info.txt`)**: Each cost sheet folder contains a manifest generated at upload time showing:
+   - Cost Sheet Number & Database ID
+   - Deal Subject, Customer Name, OEM, Distributor, and Business Unit
+   - Salesperson & Initiator contact details
+   - Commercial totals (Total Sale, Total Purchase, Net Profit, Margin %)
+   - List of all physically attached documents with file sizes and upload timestamps
+3. **Machine-Readable Metadata (`deal-metadata.json`)**: Ideal for cold-storage scripts, S3 / rsync sync tasks, or compliance indexing.
+4. **Clean File Naming**: Files preserve their readable original filenames with safe sanitization (no random gibberish collision hashes). Duplicate filenames are incremented safely (e.g., `Quote_(1).pdf`).
+5. **Lifecycle Management**: Deleting an attachment removes the file from disk and updates the manifest. Deleting a draft cost sheet cleanly purges its directory.
+
+---
+
+## 📦 Full System Backup & Disaster Recovery (.zip Import / Export)
+
+The portal includes an enterprise-grade, one-click Backup & Disaster Recovery system accessible under **Admin Tools → Backup & Disaster Recovery**:
+
+### What's Inside an Exported Backup Archive:
+- **`backup-metadata.json`**: System version, export timestamp, admin identity, and full count of entities.
+- **`database-backup.json`**: Complete JSON dump of all 10 PostgreSQL database tables:
+  - Users, roles, credentials, and organizational teams
+  - Customer accounts & contact details
+  - Master dropdown configurations (OEMs, Distributors, Business Units)
+  - Cost Sheets with all commercial fields, currencies, and discounts
+  - Line Items with cost, selling price, quantities, and margins
+  - 6-Stage Approval histories and comments
+  - Document attachment catalog & audit logs
+- **`uploads/` Folder Tree**: Every uploaded vendor quotation, BOM spreadsheet, customer PO, and generated `deal-info.txt` manifest, organized by Cost Sheet number.
+
+### Import & Restoration Features:
+1. **Pre-Restore Inspection**: Uploading a `.zip` immediately inspects and validates the archive without modifying the system. It displays exact counts of cost sheets, line items, accounts, users, and physical attachments.
+2. **Restore Modes**:
+   - **Clean Replacement (Disaster Recovery)**: Cleans the existing database and uploads directory, restoring the exact state from the snapshot. Safely resets all auto-increment sequences.
+   - **Safe Merge / Append**: Preserves existing data and appends missing cost sheets, accounts, and master dropdowns.
+3. **Safety Protection**: Requires explicit checkbox confirmation and safety prompt before executing destructive operations.
+
+### API Endpoints for Automated Backups:
+- `GET /api/backup/export` (Bearer JWT, Admin only) → Returns streaming `.zip` file.
+- `POST /api/backup/inspect` (multipart `file`) → Returns inspection metadata and counts.
+- `POST /api/backup/restore` (multipart `file`, `mode=replace|merge`) → Restores database and physical files.
+
+---
+
 ## 👥 Default Seed Credentials & Role Matrix
 
 On initial boot, the application seeds pre-configured departmental users. All accounts use password: **`Shro@2026`**

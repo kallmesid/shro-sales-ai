@@ -33,9 +33,16 @@ export async function apiRequest(endpoint: string, options: RequestInit = {}) {
     throw new Error(errorMessage);
   }
 
-  // Handle blob responses (like Excel export)
+  // Handle blob responses (like Excel and ZIP backup exports)
   const contentType = response.headers.get('content-type');
-  if (contentType && contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')) {
+  if (
+    contentType && (
+      contentType.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') ||
+      contentType.includes('application/zip') ||
+      contentType.includes('application/x-zip-compressed') ||
+      contentType.includes('application/octet-stream')
+    )
+  ) {
     return response.blob();
   }
 

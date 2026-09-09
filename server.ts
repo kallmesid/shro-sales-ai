@@ -18,6 +18,7 @@ import userRoutes from './server/routes/userRoutes.ts';
 import reportRoutes from './server/routes/reportRoutes.ts';
 import configRoutes from './server/routes/configRoutes.ts';
 import uploadRoutes from './server/routes/uploadRoutes.ts';
+import backupRoutes from './server/routes/backupRoutes.ts';
 
 dotenv.config();
 
@@ -57,6 +58,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/uploads', uploadRoutes);
+app.use('/api/backup', backupRoutes);
 
 // Global Error Handler for API
 app.use('/api', (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

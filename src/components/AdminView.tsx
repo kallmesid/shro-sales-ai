@@ -12,10 +12,12 @@ import {
   CheckCircle, 
   AlertCircle,
   KeyRound,
-  UserPlus
+  UserPlus,
+  Archive
 } from 'lucide-react';
 import { User, DropdownOptions, Team } from '../types.ts';
 import { apiRequest } from '../lib/api.ts';
+import { BackupRestoreView } from './BackupRestoreView.tsx';
 
 interface AdminViewProps {
   currentUser: User;
@@ -30,7 +32,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   onDropdownsUpdated,
   dropdowns,
 }) => {
-  const [activeTab, setActiveTab] = useState<'users' | 'sudo' | 'dropdowns' | 'teams'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'sudo' | 'dropdowns' | 'teams' | 'backup'>('users');
   const [users, setUsers] = useState<User[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
@@ -239,6 +241,17 @@ export const AdminView: React.FC<AdminViewProps> = ({
         >
           <ShieldAlert className="w-4 h-4" />
           <span>Teams ({teams.length})</span>
+        </button>
+
+        <button
+          id="tab-admin-backup"
+          onClick={() => setActiveTab('backup')}
+          className={`flex-1 py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer ${
+            activeTab === 'backup' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Archive className="w-4 h-4" />
+          <span>Backup & Disaster Recovery</span>
         </button>
       </div>
 
@@ -475,6 +488,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {/* TAB 5: BACKUP & RESTORE */}
+      {activeTab === 'backup' && (
+        <BackupRestoreView />
       )}
 
       {/* User Add/Edit Modal */}
