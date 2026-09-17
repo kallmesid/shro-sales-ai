@@ -10,7 +10,8 @@ import {
   Check, 
   FileText, 
   X,
-  ChevronDown
+  ChevronDown,
+  Menu
 } from 'lucide-react';
 import { User, NotificationItem } from '../types.ts';
 import { apiRequest } from '../lib/api.ts';
@@ -23,6 +24,7 @@ interface TopBarProps {
   onExitSudo: () => void;
   onSelectCostSheet: (id: number) => void;
   onOpenSudoModal: () => void;
+  onToggleSidebar: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -33,6 +35,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onExitSudo,
   onSelectCostSheet,
   onOpenSudoModal,
+  onToggleSidebar,
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -91,16 +94,26 @@ export const TopBar: React.FC<TopBarProps> = ({
   };
 
   return (
-    <header id="app-topbar" className="h-16 bg-white border-b border-slate-200 sticky top-0 z-30 px-6 flex items-center justify-between shadow-xs">
-      {/* Left side: System Branding & Sudo Mode Banner */}
-      <div className="flex items-center gap-4">
+    <header id="app-topbar" className="h-16 bg-white border-b border-slate-200 sticky top-0 z-30 px-4 md:px-6 flex items-center justify-between shadow-xs">
+      {/* Left side: Menu Toggle, System Branding & Sudo Mode Banner */}
+      <div className="flex items-center gap-3">
+        <button
+          id="topbar-menu-toggle-button"
+          onClick={onToggleSidebar}
+          title="Open Navigation Menu"
+          className="p-2 rounded-lg text-slate-700 hover:text-blue-600 hover:bg-slate-100 transition flex items-center gap-1.5 cursor-pointer border border-slate-200 shadow-xs"
+        >
+          <Menu className="w-5 h-5 text-slate-700" />
+          <span className="text-xs font-semibold text-slate-700 hidden sm:inline">Menu</span>
+        </button>
+
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-base shadow-sm">
             S
           </div>
           <div>
             <h1 className="text-sm font-bold text-slate-900 tracking-tight leading-none">SHRO Systems</h1>
-            <span className="text-[11px] font-medium text-slate-500">Sales Quotation & Cost Sheet Portal</span>
+            <span className="text-[11px] font-medium text-slate-500 hidden sm:inline">Sales Quotation & Cost Sheet Portal</span>
           </div>
         </div>
 

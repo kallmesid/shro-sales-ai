@@ -107,14 +107,15 @@ export function generateCostSheetPDF(sheet: CostSheet) {
   doc.text(sheet.status === 'Approved' ? 'All 6 Stages Completed' : `Stage ${sheet.current_stage} Pending`, col3X + 85, 118);
 
   // Line Items Table
+  const curr = sheet.currency || 'INR';
   const tableData = (sheet.line_items || []).map((item, index) => [
     index + 1,
     item.description,
     Number(item.quantity).toLocaleString(),
-    `₹${Number(item.unit_purchase).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
-    `₹${Number(item.total_purchase).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
-    `₹${Number(item.unit_sale).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
-    `₹${Number(item.total_sale).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
+    `${curr} ${Number(item.unit_purchase).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    `${curr} ${Number(item.total_purchase).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    `${curr} ${Number(item.unit_sale).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    `${curr} ${Number(item.total_sale).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     `${Number(item.margin_percentage).toFixed(2)}%`
   ]);
 
@@ -147,40 +148,86 @@ export function generateCostSheetPDF(sheet: CostSheet) {
     margin: { left: 30, right: 30 },
   });
 
-  // Calculate position after table
-  const finalY = (doc as any).lastAutoTable.finalY + 15;
+  // Calculate position after table, checking for page overflow
+  let finalY = (doc as any).lastAutoTable.finalY + 16;
+  const sectionHeight = 125;
 
-  // Financial Breakdown Box (Right aligned)
-  const boxWidth = 260;
+  if (finalY + sectionHeight > pageHeight - 30) {
+    doc.addPage('landscape');
+    finalY = 35;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Financial Summary & Workflow Sign-offs (${sheet.cs_number})`, 30, finalY - 12);
+  }
+
+  // Financial Breakdown Box (Right aligned with clean width and structured alignment)
+  const boxWidth = 295;
   const boxX = pageWidth - boxWidth - 30;
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(203, 213, 225);
-  doc.roundedRect(boxX, finalY, boxWidth, 115, 4, 4, 'FD');
+  doc.roundedRect(boxX, finalY, boxWidth, sectionHeight, 4, 4, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text('Financial Totals & Commercial Breakdown:', boxX + 12, finalY + 16);
+
+  // Line separator
+  doc.setDrawColor(226, 232, 240);
+  doc.line(boxX + 10, finalY + 22, boxX + boxWidth - 10, finalY + 22);
 
   doc.setFontSize(8.5);
-  let curY = finalY + 16;
+  let curY = finalY + 34;
 
   const addFinRow = (label: string, value: string, isBold = false, color = [15, 23, 42]) => {
     doc.setFont('helvetica', isBold ? 'bold' : 'normal');
     doc.setTextColor(color[0], color[1], color[2]);
     doc.text(label, boxX + 12, curY);
     doc.text(value, boxX + boxWidth - 12, curY, { align: 'right' });
-    curY += 14;
+    curY += 13.5;
   };
 
-  addFinRow('Total Purchase Price:', `₹${Number(sheet.total_purchase).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
-  addFinRow(`Discount (${sheet.discount_type} ${sheet.discount_value}%):`, `- ₹${Number((sheet.total_purchase - (sheet.net_purchase - sheet.consultation_charges - sheet.freight_charges))).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, false, [220, 38, 38]);
-  addFinRow('Consultation Charges:', `+ ₹${Number(sheet.consultation_charges).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
-  addFinRow('Freight / Shipping:', `+ ₹${Number(sheet.freight_charges).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`);
-  addFinRow('Net Purchase Cost:', `₹${Number(sheet.net_purchase).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, true);
-  addFinRow('Total Sale (Deal Value):', `₹${Number(sheet.total_sale).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, true, [37, 99, 235]);
-  addFinRow(`Net Profit & Margin:`, `₹${Number(sheet.net_profit).toLocaleString('en-IN', { minimumFractionDigits: 2 })} (${Number(sheet.margin_percentage).toFixed(2)}%)`, true, [22, 163, 74]);
+  const totalPurchase = Number(sheet.total_purchase) || 0;
+  const discountType = sheet.discount_type || 'Percentage';
+  const discountVal = Number(sheet.discount_value) || 0;
+  let discountAmount = 0;
+  let discountLabel = 'Discount:';
+
+  if (discountType === 'Percentage') {
+    discountAmount = (totalPurchase * discountVal) / 100;
+    discountLabel = `Discount (${discountVal}%):`;
+  } else {
+    discountAmount = discountVal;
+    discountLabel = `Discount (Flat):`;
+  }
+
+  addFinRow('Total Purchase Price:', `${curr} ${totalPurchase.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+  addFinRow(discountLabel, `- ${curr} ${discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, false, [220, 38, 38]);
+  addFinRow('Consultation Charges:', `+ ${curr} ${(Number(sheet.consultation_charges) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+  addFinRow('Freight / Shipping:', `+ ${curr} ${(Number(sheet.freight_charges) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+  
+  // Subtle divider before net purchase
+  doc.setDrawColor(226, 232, 240);
+  doc.line(boxX + 10, curY - 5, boxX + boxWidth - 10, curY - 5);
+
+  addFinRow('Net Purchase Cost:', `${curr} ${(Number(sheet.net_purchase) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, true);
+  addFinRow('Total Sale (Deal Value):', `${curr} ${(Number(sheet.total_sale) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, true, [37, 99, 235]);
+  
+  // Highlight box for Net Profit & Margin
+  doc.setFillColor(240, 253, 244);
+  doc.setDrawColor(187, 247, 208);
+  doc.roundedRect(boxX + 8, curY - 8, boxWidth - 16, 20, 3, 3, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(22, 163, 74);
+  doc.text('Net Profit & Margin:', boxX + 14, curY + 4);
+  doc.text(`${curr} ${(Number(sheet.net_profit) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${(Number(sheet.margin_percentage) || 0).toFixed(2)}%)`, boxX + boxWidth - 14, curY + 4, { align: 'right' });
 
   // Sequential Approval Workflow Sign-off Section (Left side)
   const workflowWidth = boxX - 45;
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(226, 232, 240);
-  doc.roundedRect(30, finalY, workflowWidth, 115, 4, 4, 'FD');
+  doc.roundedRect(30, finalY, workflowWidth, sectionHeight, 4, 4, 'FD');
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);

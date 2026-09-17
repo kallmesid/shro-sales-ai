@@ -97,3 +97,58 @@ export async function deleteAccount(req: AuthRequest, res: Response) {
     return res.status(500).json({ error: 'Failed to delete account' });
   }
 }
+
+export async function batchCreateAccounts(req: AuthRequest, res: Response) {
+  try {
+    const { accounts } = req.body;
+    if (!Array.isArray(accounts) || accounts.length === 0) {
+      return res.status(400).json({ error: 'No accounts provided' });
+    }
+
+    let createdCount = 0;
+    let updatedCount = 0;
+
+    for (const acc of accounts) {
+      if (!acc.name || typeof acc.name !== 'string' || acc.name.trim() === '') {
+        continue;
+      }
+      const trimmedName = acc.name.trim();
+
+      const existing = await query('SELECT id FROM accounts WHERE LOWER(name) = LOWER($1)', [trimmedName]);
+      if (existing.rows.length > 0) {
+        await query(`
+          UPDATE accounts
+          SET industry = COALESCE(NULLIF($1, ''), industry),
+              phone = COALESCE(NULLIF($2, ''), phone),
+              email = COALESCE(NULLIF($3, ''), email),
+              comments = COALESCE(NULLIF($4, ''), comments)
+          WHERE id = $5
+        `, [acc.industry || '', acc.phone || '', acc.email || '', acc.comments || '', existing.rows[0].id]);
+        updatedCount++;
+      } else {
+        await query(`
+          INSERT INTO accounts (name, industry, phone, email, comments, contacts)
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `, [
+          trimmedName,
+          acc.industry || 'IT & ITES',
+          acc.phone || '',
+          acc.email || '',
+          acc.comments || '',
+          JSON.stringify(acc.contacts || [])
+        ]);
+        createdCount++;
+      }
+    }
+
+    return res.json({
+      message: `Processed ${createdCount + updatedCount} accounts (${createdCount} new, ${updatedCount} updated).`,
+      createdCount,
+      updatedCount
+    });
+  } catch (error) {
+    console.error('Error in batchCreateAccounts:', error);
+    return res.status(500).json({ error: 'Failed to batch import accounts' });
+  }
+}
+

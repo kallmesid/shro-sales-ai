@@ -185,12 +185,57 @@ export async function initDb() {
       is_read BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS portal_settings (
+      key VARCHAR(100) PRIMARY KEY,
+      value JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
   `;
 
   if (pgPool) {
     await pgPool.query(schemaSql);
   } else if (pgliteInstance) {
     await pgliteInstance.exec(schemaSql);
+  }
+
+  // Seed default branding if not present
+  const brandingCheck = await query("SELECT key FROM portal_settings WHERE key = 'branding'");
+  if (brandingCheck.rows.length === 0) {
+    const defaultBranding = {
+      company_name: 'SHRO Systems Pvt. Ltd.',
+      tagline: 'Digital Transformation Specialists',
+      est_year: 'Est. 1988',
+      office_address: 'Office No.1403, 14th Floor DNK Square, Airport Road, Viman Nagar, Pune, Maharashtra, India, 411014',
+      registered_office: '1184/4, Shreenath, Dnyaneshwar Paduka Chowk, FC Road, Shivaji Nagar, Pune - 411005',
+      phone: '(020) 25532244, 25531863, 25530708, 30225051',
+      website: 'www.shrosystems.com',
+      email: 'contact@shrosystems.com',
+      gstin: '27AAGCS0761F1ZG',
+      pan: 'AAGCS0761F',
+      default_terms: 'Payment Term: As Per Agreed Terms 30 Days\nTaxes: Extra at Actual\nDelivery Period: 4-6 weeks from date of receipt of PO\nFreight Charges: Extra as applicable if delivery Outside Pune\nOrder to be Placed on: Shro Systems Pvt. Ltd. 1184/4, Shreenath, Dnyaneshwar Paduka Chowk, FC Road, Shivaji Nagar, Pune - 411005',
+      primary_color: '#0052cc',
+    };
+    await query("INSERT INTO portal_settings (key, value) VALUES ('branding', $1)", [JSON.stringify(defaultBranding)]);
+  }
+
+  // Seed default email settings if not present
+  const emailCheck = await query("SELECT key FROM portal_settings WHERE key = 'email'");
+  if (emailCheck.rows.length === 0) {
+    const defaultEmail = {
+      smtp_host: 'smtp.office365.com',
+      smtp_port: 587,
+      smtp_secure: false,
+      smtp_user: 'approvals@shrosystems.com',
+      smtp_password: '',
+      from_name: 'SHRO Systems Approvals',
+      from_email: 'approvals@shrosystems.com',
+      enable_notifications: true,
+      notify_submission: true,
+      notify_approval: true,
+      notify_rejection: true,
+    };
+    await query("INSERT INTO portal_settings (key, value) VALUES ('email', $1)", [JSON.stringify(defaultEmail)]);
   }
 
   console.log('PostgreSQL database schemas created successfully.');

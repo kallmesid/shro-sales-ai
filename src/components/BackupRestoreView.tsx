@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Archive, 
   Download, 
@@ -9,21 +9,24 @@ import {
   RefreshCw, 
   Database, 
   FolderArchive, 
-  HardDrive,
-  FileText,
-  ShieldAlert,
-  Info,
-  Layers,
-  Users,
-  Building2,
-  Check
+  FileText, 
+  ShieldAlert, 
+  Layers, 
+  ChevronDown,
+  Check,
+  HardDrive
 } from 'lucide-react';
 import { apiRequest } from '../lib/api.ts';
 
+export type BackupScope = 'both' | 'db' | 'files';
+
 interface InspectionData {
   valid: boolean;
+  hasDatabase?: boolean;
+  hasFiles?: boolean;
   metadata?: {
     format_version?: string;
+    scope?: string;
     exported_at?: string;
     exported_by?: {
       name?: string;
@@ -56,6 +59,7 @@ interface RestoreStats {
 
 export const BackupRestoreView: React.FC = () => {
   // Export State
+  const [exportScope, setExportScope] = useState<BackupScope>('both');
   const [exporting, setExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -67,35 +71,53 @@ export const BackupRestoreView: React.FC = () => {
   const [inspectError, setInspectError] = useState<string | null>(null);
 
   // Restore State
+  const [restoreScope, setRestoreScope] = useState<BackupScope>('both');
   const [restoreMode, setRestoreMode] = useState<'replace' | 'merge'>('replace');
   const [confirmSafety, setConfirmSafety] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [restoreResult, setRestoreResult] = useState<{ message: string; mode: string; stats: RestoreStats } | null>(null);
 
+  // Scroll indicator state for right panel
+  const rightPanelRef = useRef<HTMLDivElement>(null);
+  const [canScrollDown, setCanScrollDown] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Handle Export Full Backup (.zip)
-  const handleExportBackup = async () => {
+  // Check scroll position of right panel to display visual cues
+  const checkScroll = () => {
+    if (!rightPanelRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = rightPanelRef.current;
+    setCanScrollDown(scrollHeight - scrollTop - clientHeight > 30);
+  };
+
+  useEffect(() => {
+    checkScroll();
+  }, [inspectionData, selectedFile, restoreResult]);
+
+  // Handle Export Backup (.zip) with chosen scope
+  const handleExportBackup = async (scopeToUse: BackupScope = exportScope) => {
     setExporting(true);
     setExportError(null);
     setExportSuccess(null);
     try {
-      const blob = await apiRequest('/api/backup/export');
+      const blob = await apiRequest(`/api/backup/export?scope=${scopeToUse}`);
       
-      // Trigger download in browser
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      a.download = `shro-portal-backup-${timestamp}.zip`;
+      a.download = `shro-portal-backup-${scopeToUse}-${timestamp}.zip`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      setExportSuccess(`Backup archive (${(blob.size / (1024 * 1024)).toFixed(2)} MB) downloaded successfully.`);
+      const scopeLabel = 
+        scopeToUse === 'both' ? 'Full system package (DB + Files)' :
+        scopeToUse === 'db' ? 'Database package only' : 'Uploaded PDFs & files only';
+
+      setExportSuccess(`${scopeLabel} (${(blob.size / (1024 * 1024)).toFixed(2)} MB) downloaded successfully.`);
     } catch (err: any) {
       setExportError(err.message || 'Failed to generate backup archive');
     } finally {
@@ -132,11 +154,20 @@ export const BackupRestoreView: React.FC = () => {
     formData.append('file', selectedFile);
 
     try {
-      const data = await apiRequest('/api/backup/inspect', {
+      const data: InspectionData = await apiRequest('/api/backup/inspect', {
         method: 'POST',
         body: formData
       });
       setInspectionData(data);
+
+      // Auto-select smart scope based on archive contents
+      if (data.hasDatabase && !data.hasFiles) {
+        setRestoreScope('db');
+      } else if (!data.hasDatabase && data.hasFiles) {
+        setRestoreScope('files');
+      } else {
+        setRestoreScope('both');
+      }
     } catch (err: any) {
       setInspectError(err.message || 'Failed to inspect backup file');
     } finally {
@@ -148,13 +179,12 @@ export const BackupRestoreView: React.FC = () => {
   const handleExecuteRestore = async () => {
     if (!selectedFile) return;
     if (!confirmSafety) {
-      alert('Please confirm that you understand this restore operation.');
       return;
     }
 
     if (restoreMode === 'replace') {
       const confirmed = window.confirm(
-        'WARNING: Clean Replacement will replace current database records and uploads with the contents of this backup. Are you sure you want to proceed?'
+        'WARNING: Clean Replacement will replace existing records/files with this backup snapshot. Continue?'
       );
       if (!confirmed) return;
     }
@@ -166,6 +196,7 @@ export const BackupRestoreView: React.FC = () => {
     const formData = new FormData();
     formData.append('file', selectedFile);
     formData.append('mode', restoreMode);
+    formData.append('scope', restoreScope);
 
     try {
       const result = await apiRequest('/api/backup/restore', {
@@ -180,6 +211,15 @@ export const BackupRestoreView: React.FC = () => {
     }
   };
 
+  const scrollToBottom = () => {
+    if (rightPanelRef.current) {
+      rightPanelRef.current.scrollTo({
+        top: rightPanelRef.current.scrollHeight,
+        behavior: 'smooth'
+      });
+    }
+  };
+
   return (
     <div className="space-y-8">
       {/* Header Banner */}
@@ -188,29 +228,28 @@ export const BackupRestoreView: React.FC = () => {
           <div className="space-y-1">
             <div className="flex items-center gap-2.5">
               <Archive className="w-6 h-6 text-blue-400" />
-              <h2 className="text-xl font-bold tracking-tight">Full System Backup & Disaster Recovery</h2>
+              <h2 className="text-xl font-bold tracking-tight">System Backup & Granular Disaster Recovery</h2>
             </div>
             <p className="text-sm text-slate-300 max-w-3xl leading-relaxed">
-              Export and import complete snapshots of the entire application as a single self-contained <code className="text-blue-300 bg-slate-800 px-1.5 py-0.5 rounded text-xs">.zip</code> archive.
-              Includes all PostgreSQL database tables, deal commercials, approval logs, users, master dropdown configs, and all physical PDF quotes and BOM attachments.
+              Create and restore backups for your entire system, database tables only, or uploaded PDF quotations & attachments.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               id="btn-export-backup-hero"
-              onClick={handleExportBackup}
+              onClick={() => handleExportBackup(exportScope)}
               disabled={exporting}
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg shadow transition disabled:opacity-50"
             >
               {exporting ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  Generating Archive...
+                  Downloading...
                 </>
               ) : (
                 <>
                   <Download className="w-4 h-4" />
-                  Export Full Backup (.zip)
+                  Download Backup
                 </>
               )}
             </button>
@@ -231,7 +270,7 @@ export const BackupRestoreView: React.FC = () => {
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
         {/* Card 1: System Export Details */}
         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -241,44 +280,113 @@ export const BackupRestoreView: React.FC = () => {
               </div>
               <div>
                 <h3 className="text-base font-semibold text-slate-900">Export Backup Package</h3>
-                <p className="text-xs text-slate-500">Download complete system state into an offline portable zip</p>
+                <p className="text-xs text-slate-500">Choose which components to include in your backup package</p>
               </div>
             </div>
-            <span className="px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 rounded-full border border-emerald-200">
-              Disaster-Ready
+            <span className="px-2.5 py-1 text-xs font-semibold text-blue-700 bg-blue-50 rounded-full border border-blue-200">
+              Granular Export
             </span>
           </div>
 
-          <div className="text-xs text-slate-600 space-y-3 leading-relaxed">
-            <p>
-              The exported archive contains everything required to recover or migrate the system to any other server or container instance:
-            </p>
-            <div className="space-y-2 bg-slate-50 p-4 rounded-lg border border-slate-200/80">
-              <div className="flex items-start gap-2.5">
-                <Database className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-                <div>
-                  <strong className="text-slate-800">database-backup.json:</strong> Full dump of all 10 PostgreSQL tables (Users, Accounts, Cost Sheets, Line Items, 6-Stage Approval Logs, Dropdown Options, Notifications).
+          {/* Granular Scope Selector */}
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider">
+              1. Choose Backup Scope
+            </label>
+            <div className="grid grid-cols-1 gap-2.5">
+              {/* Option 1: Both */}
+              <label 
+                className={`p-3.5 rounded-lg border-2 cursor-pointer transition flex items-start justify-between ${
+                  exportScope === 'both' 
+                    ? 'border-blue-600 bg-blue-50/50' 
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <input
+                    type="radio"
+                    name="exportScope"
+                    value="both"
+                    checked={exportScope === 'both'}
+                    onChange={() => setExportScope('both')}
+                    className="mt-1 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div>
+                    <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-blue-600" />
+                      Both Database & Uploaded PDFs (Full System)
+                    </span>
+                    <p className="text-[11px] text-slate-600 mt-0.5">
+                      Complete snapshot containing all 10 SQL tables plus the entire uploads directory with PDFs, BOMs, and vendor quotes.
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-start gap-2.5">
-                <FolderArchive className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <div>
-                  <strong className="text-slate-800">uploads/ Directory Tree:</strong> All physical files structured cost-sheet-wise (`uploads/SHRO_.../`), including PDF BOMs, vendor quotations, and generated plaintext <code className="bg-white px-1 py-0.5 rounded border text-[11px]">deal-info.txt</code> manifests.
+              </label>
+
+              {/* Option 2: Database Only */}
+              <label 
+                className={`p-3.5 rounded-lg border-2 cursor-pointer transition flex items-start justify-between ${
+                  exportScope === 'db' 
+                    ? 'border-blue-600 bg-blue-50/50' 
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <input
+                    type="radio"
+                    name="exportScope"
+                    value="db"
+                    checked={exportScope === 'db'}
+                    onChange={() => setExportScope('db')}
+                    className="mt-1 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div>
+                    <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
+                      <Database className="w-3.5 h-3.5 text-emerald-600" />
+                      Database Only (Lightweight)
+                    </span>
+                    <p className="text-[11px] text-slate-600 mt-0.5">
+                      Users, accounts, cost sheets, deals, 6-stage logs, line items, and configurations. Excludes heavy attachments.
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-start gap-2.5">
-                <FileText className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
-                <div>
-                  <strong className="text-slate-800">backup-metadata.json:</strong> Timestamp, origin admin user, total record counts, and integrity checksums for automated scripts.
+              </label>
+
+              {/* Option 3: Uploaded PDFs Only */}
+              <label 
+                className={`p-3.5 rounded-lg border-2 cursor-pointer transition flex items-start justify-between ${
+                  exportScope === 'files' 
+                    ? 'border-blue-600 bg-blue-50/50' 
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <input
+                    type="radio"
+                    name="exportScope"
+                    value="files"
+                    checked={exportScope === 'files'}
+                    onChange={() => setExportScope('files')}
+                    className="mt-1 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div>
+                    <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
+                      <FolderArchive className="w-3.5 h-3.5 text-amber-600" />
+                      Uploaded PDFs & Attachments Only
+                    </span>
+                    <p className="text-[11px] text-slate-600 mt-0.5">
+                      Physical document files organised per cost sheet folder (`uploads/SHRO_.../`), including BOM spreadsheets and vendor PDFs.
+                    </p>
+                  </div>
                 </div>
-              </div>
+              </label>
             </div>
           </div>
 
           <div className="pt-2">
             <button
               id="btn-export-backup-card"
-              onClick={handleExportBackup}
+              onClick={() => handleExportBackup(exportScope)}
               disabled={exporting}
               className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-semibold shadow transition disabled:opacity-50"
             >
@@ -290,23 +398,23 @@ export const BackupRestoreView: React.FC = () => {
               ) : (
                 <>
                   <Archive className="w-4 h-4" />
-                  Download Complete System Backup (.zip)
+                  Download Selected Backup Package (.zip)
                 </>
               )}
             </button>
           </div>
         </div>
 
-        {/* Card 2: Restore from Backup */}
-        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+        {/* Card 2: Restore from Backup (Right Access Panel) */}
+        <div className="bg-white border border-slate-200 rounded-xl shadow-sm relative flex flex-col">
+          <div className="p-6 pb-4 border-b border-slate-100 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
                 <Upload className="w-4 h-4" />
               </div>
               <div>
                 <h3 className="text-base font-semibold text-slate-900">Import & Restore Backup</h3>
-                <p className="text-xs text-slate-500">Restore database records, configs, and attachments from a .zip</p>
+                <p className="text-xs text-slate-500">Restore database records and/or uploaded files</p>
               </div>
             </div>
             <span className="px-2.5 py-1 text-xs font-semibold text-amber-700 bg-amber-50 rounded-full border border-amber-200">
@@ -314,294 +422,317 @@ export const BackupRestoreView: React.FC = () => {
             </span>
           </div>
 
-          {/* File Picker */}
-          <div className="space-y-3">
-            <label className="block text-xs font-semibold text-slate-700">
-              Select Backup Archive (.zip)
-            </label>
-            <div 
-              onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-slate-300 hover:border-blue-400 bg-slate-50/60 rounded-xl p-6 text-center cursor-pointer transition flex flex-col items-center justify-center gap-2"
-            >
-              <FileArchive className="w-8 h-8 text-blue-500" />
-              {selectedFile ? (
-                <div className="text-xs">
-                  <p className="font-semibold text-slate-800">{selectedFile.name}</p>
-                  <p className="text-slate-500">{(selectedFile.size / (1024 * 1024)).toFixed(2)} MB</p>
-                </div>
-              ) : (
-                <div className="text-xs text-slate-500">
-                  <p className="font-semibold text-blue-600">Click to browse or drag & drop</p>
-                  <p>Accepts .zip backup archives generated by SHRO Portal</p>
+          {/* Scrollable Container with Smooth Scrollbar */}
+          <div 
+            ref={rightPanelRef}
+            onScroll={checkScroll}
+            className="p-6 space-y-6 max-h-[640px] overflow-y-auto pr-3 scroll-smooth"
+          >
+            {/* Step 1: File Picker */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider">
+                1. Select Backup Archive (.zip)
+              </label>
+              <div 
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-slate-300 hover:border-blue-400 bg-slate-50/60 rounded-xl p-5 text-center cursor-pointer transition flex flex-col items-center justify-center gap-2"
+              >
+                <FileArchive className="w-8 h-8 text-blue-500" />
+                {selectedFile ? (
+                  <div className="text-xs">
+                    <p className="font-semibold text-slate-800">{selectedFile.name}</p>
+                    <p className="text-slate-500">{(selectedFile.size / (1024 * 1024)).toFixed(2)} MB</p>
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-500">
+                    <p className="font-semibold text-blue-600">Click to browse or drag & drop</p>
+                    <p>Select any SHRO backup archive (.zip)</p>
+                  </div>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".zip,application/zip,application/x-zip-compressed"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+              </div>
+
+              {selectedFile && !inspectionData && (
+                <div className="flex justify-end pt-1">
+                  <button
+                    id="btn-inspect-backup"
+                    type="button"
+                    onClick={handleInspectFile}
+                    disabled={inspecting}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition disabled:opacity-50"
+                  >
+                    {inspecting ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        Verifying Archive...
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="w-3.5 h-3.5" />
+                        Inspect Archive Contents
+                      </>
+                    )}
+                  </button>
                 </div>
               )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".zip,application/zip,application/x-zip-compressed"
-                onChange={handleFileChange}
-                className="hidden"
-              />
             </div>
+
+            {inspectError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                <span>{inspectError}</span>
+              </div>
+            )}
+
+            {/* Inspection Results Section */}
+            {inspectionData && (
+              <div className="space-y-5 pt-2 border-t border-slate-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span className="text-xs font-bold text-slate-900">Archive Verified</span>
+                  </div>
+                  <span className="text-[11px] text-slate-500">
+                    {inspectionData.metadata?.exported_at ? new Date(inspectionData.metadata.exported_at).toLocaleDateString() : 'Ready'}
+                  </span>
+                </div>
+
+                {/* Content detection chips */}
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className={`p-2.5 rounded-lg border flex items-center gap-2 ${
+                    inspectionData.hasDatabase !== false 
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                      : 'bg-slate-50 border-slate-200 text-slate-400'
+                  }`}>
+                    <Database className="w-4 h-4 shrink-0" />
+                    <div>
+                      <div className="font-bold">Database Tables</div>
+                      <div className="text-[11px] opacity-80">
+                        {inspectionData.hasDatabase !== false ? `${inspectionData.tableCounts.cost_sheets || 0} Cost Sheets` : 'Not in archive'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={`p-2.5 rounded-lg border flex items-center gap-2 ${
+                    inspectionData.hasFiles !== false && inspectionData.filesCount > 0
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                      : 'bg-slate-50 border-slate-200 text-slate-400'
+                  }`}>
+                    <FolderArchive className="w-4 h-4 shrink-0" />
+                    <div>
+                      <div className="font-bold">Uploaded PDFs</div>
+                      <div className="text-[11px] opacity-80">
+                        {inspectionData.filesCount > 0 ? `${inspectionData.filesCount} files (${inspectionData.filesFormatted})` : '0 files'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step 2: Choose Restore Scope */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider">
+                    2. Select Restore Target
+                  </label>
+                  <div className="grid grid-cols-1 gap-2 text-xs">
+                    <label 
+                      className={`p-3 rounded-lg border-2 cursor-pointer transition flex items-center justify-between ${
+                        restoreScope === 'both' 
+                          ? 'border-blue-600 bg-blue-50/40' 
+                          : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <input
+                          type="radio"
+                          name="restoreScope"
+                          value="both"
+                          checked={restoreScope === 'both'}
+                          onChange={() => setRestoreScope('both')}
+                          className="text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="font-semibold text-slate-800">Restore Both Database & Uploaded PDFs</span>
+                      </div>
+                      <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">Complete</span>
+                    </label>
+
+                    <label 
+                      className={`p-3 rounded-lg border-2 cursor-pointer transition flex items-center justify-between ${
+                        restoreScope === 'db' 
+                          ? 'border-blue-600 bg-blue-50/40' 
+                          : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <input
+                          type="radio"
+                          name="restoreScope"
+                          value="db"
+                          checked={restoreScope === 'db'}
+                          onChange={() => setRestoreScope('db')}
+                          className="text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="font-semibold text-slate-800">Restore Database Tables Only</span>
+                      </div>
+                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium">DB Only</span>
+                    </label>
+
+                    <label 
+                      className={`p-3 rounded-lg border-2 cursor-pointer transition flex items-center justify-between ${
+                        restoreScope === 'files' 
+                          ? 'border-blue-600 bg-blue-50/40' 
+                          : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <input
+                          type="radio"
+                          name="restoreScope"
+                          value="files"
+                          checked={restoreScope === 'files'}
+                          onChange={() => setRestoreScope('files')}
+                          className="text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="font-semibold text-slate-800">Restore Uploaded PDFs & Files Only</span>
+                      </div>
+                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium">Files Only</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Step 3: Choose Restoration Mode */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-800 uppercase tracking-wider">
+                    3. Restoration Mode
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <label className={`p-3 rounded-lg border cursor-pointer ${
+                      restoreMode === 'replace' ? 'border-blue-600 bg-blue-50/50' : 'border-slate-200 bg-white'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="restoreMode"
+                          value="replace"
+                          checked={restoreMode === 'replace'}
+                          onChange={() => setRestoreMode('replace')}
+                          className="text-blue-600"
+                        />
+                        <span className="font-bold text-slate-900">Clean Replace</span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1 leading-tight">
+                        Overwrites existing target data with backup state.
+                      </p>
+                    </label>
+
+                    <label className={`p-3 rounded-lg border cursor-pointer ${
+                      restoreMode === 'merge' ? 'border-blue-600 bg-blue-50/50' : 'border-slate-200 bg-white'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="restoreMode"
+                          value="merge"
+                          checked={restoreMode === 'merge'}
+                          onChange={() => setRestoreMode('merge')}
+                          className="text-blue-600"
+                        />
+                        <span className="font-bold text-slate-900">Safe Merge</span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-1 leading-tight">
+                        Keeps current records and appends missing ones.
+                      </p>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Step 4: Confirmation & Execution */}
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                  <div className="flex items-start gap-2.5">
+                    <input
+                      id="chk-confirm-restore"
+                      type="checkbox"
+                      checked={confirmSafety}
+                      onChange={(e) => setConfirmSafety(e.target.checked)}
+                      className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
+                    />
+                    <label htmlFor="chk-confirm-restore" className="text-xs text-slate-700 cursor-pointer">
+                      I authorize this restoration operation ({restoreScope.toUpperCase()} scope, {restoreMode} mode).
+                    </label>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedFile(null);
+                        setInspectionData(null);
+                      }}
+                      className="px-3 py-2 border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-100 transition"
+                    >
+                      Reset
+                    </button>
+                    <button
+                      id="btn-execute-restore"
+                      type="button"
+                      onClick={handleExecuteRestore}
+                      disabled={restoring || !confirmSafety}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg shadow-sm transition disabled:opacity-50"
+                    >
+                      {restoring ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          Restoring...
+                        </>
+                      ) : (
+                        <>
+                          <ShieldAlert className="w-3.5 h-3.5" />
+                          Execute Restoration
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {restoreError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
+                <span>{restoreError}</span>
+              </div>
+            )}
+
+            {restoreResult && (
+              <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl space-y-2">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <h4 className="text-xs font-bold">{restoreResult.message}</h4>
+                </div>
+                <p className="text-[11px] text-emerald-700">
+                  Restore mode: <strong>{restoreResult.mode.toUpperCase()}</strong>. Target scope applied successfully.
+                </p>
+              </div>
+            )}
           </div>
 
-          {selectedFile && !inspectionData && (
-            <div className="flex justify-end">
-              <button
-                id="btn-inspect-backup"
-                type="button"
-                onClick={handleInspectFile}
-                disabled={inspecting}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition disabled:opacity-50"
-              >
-                {inspecting ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    Inspecting Archive...
-                  </>
-                ) : (
-                  <>
-                    <Layers className="w-3.5 h-3.5" />
-                    Inspect & Verify Archive Contents
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-
-          {inspectError && (
-            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
-              <span>{inspectError}</span>
+          {/* Visual Scroll Affordance when more content is below */}
+          {canScrollDown && (
+            <div 
+              onClick={scrollToBottom}
+              className="border-t border-slate-200 bg-slate-50/95 hover:bg-slate-100 p-2 text-center text-xs font-semibold text-blue-600 cursor-pointer flex items-center justify-center gap-1.5 transition rounded-b-xl shadow-inner"
+            >
+              <span>Scroll down for restore options & execution</span>
+              <ChevronDown className="w-4 h-4 animate-bounce" />
             </div>
           )}
         </div>
       </div>
-
-      {/* Inspection Results & Execution Modal/Card */}
-      {inspectionData && (
-        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
-                <CheckCircle2 className="w-5 h-5 text-blue-600" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Archive Inspection Summary</h3>
-                <p className="text-xs text-slate-500">
-                  Exported on {inspectionData.metadata?.exported_at ? new Date(inspectionData.metadata.exported_at).toLocaleString() : 'N/A'}
-                  {inspectionData.metadata?.exported_by?.name ? ` by ${inspectionData.metadata.exported_by.name}` : ''}
-                </p>
-              </div>
-            </div>
-            <span className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold rounded-full self-start sm:self-auto">
-              Archive Verified & Ready
-            </span>
-          </div>
-
-          {/* Metrics Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-lg">
-              <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider block">Cost Sheets</span>
-              <span className="text-lg font-bold text-slate-900">{inspectionData.tableCounts.cost_sheets || 0}</span>
-            </div>
-            <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-lg">
-              <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider block">Line Items</span>
-              <span className="text-lg font-bold text-slate-900">{inspectionData.tableCounts.line_items || 0}</span>
-            </div>
-            <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-lg">
-              <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider block">Customer Accounts</span>
-              <span className="text-lg font-bold text-slate-900">{inspectionData.tableCounts.accounts || 0}</span>
-            </div>
-            <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-lg">
-              <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider block">Physical Attachments</span>
-              <span className="text-lg font-bold text-slate-900">
-                {inspectionData.filesCount} ({inspectionData.filesFormatted})
-              </span>
-            </div>
-          </div>
-
-          {/* Database Tables Breakdown */}
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Database Entities Detected</h4>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 text-xs">
-              <div className="px-2.5 py-1.5 bg-slate-100 rounded text-slate-700 flex justify-between">
-                <span>Users:</span>
-                <strong className="text-slate-900">{inspectionData.tableCounts.users || 0}</strong>
-              </div>
-              <div className="px-2.5 py-1.5 bg-slate-100 rounded text-slate-700 flex justify-between">
-                <span>Teams:</span>
-                <strong className="text-slate-900">{inspectionData.tableCounts.teams || 0}</strong>
-              </div>
-              <div className="px-2.5 py-1.5 bg-slate-100 rounded text-slate-700 flex justify-between">
-                <span>Approval Logs:</span>
-                <strong className="text-slate-900">{inspectionData.tableCounts.approval_logs || 0}</strong>
-              </div>
-              <div className="px-2.5 py-1.5 bg-slate-100 rounded text-slate-700 flex justify-between">
-                <span>Master Dropdowns:</span>
-                <strong className="text-slate-900">{inspectionData.tableCounts.dropdown_options || 0}</strong>
-              </div>
-              <div className="px-2.5 py-1.5 bg-slate-100 rounded text-slate-700 flex justify-between">
-                <span>File Records:</span>
-                <strong className="text-slate-900">{inspectionData.tableCounts.uploaded_files || 0}</strong>
-              </div>
-            </div>
-          </div>
-
-          {/* Restore Options Form */}
-          <div className="p-5 bg-slate-50 rounded-xl border border-slate-200 space-y-4">
-            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Restoration Mode</h4>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <label 
-                className={`p-4 rounded-xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                  restoreMode === 'replace' 
-                    ? 'border-blue-600 bg-blue-50/50' 
-                    : 'border-slate-200 bg-white hover:border-slate-300'
-                }`}
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-sm text-slate-900">Clean Replace (Recommended for Disaster Recovery)</span>
-                    <input
-                      type="radio"
-                      name="restoreMode"
-                      value="replace"
-                      checked={restoreMode === 'replace'}
-                      onChange={() => setRestoreMode('replace')}
-                      className="text-blue-600 focus:ring-blue-500"
-                    />
-                  </div>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Wipes the existing database and replaces all cost sheets, accounts, users, and uploads folder with this backup snapshot.
-                    Guarantees 100% exact state match.
-                  </p>
-                </div>
-              </label>
-
-              <label 
-                className={`p-4 rounded-xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                  restoreMode === 'merge' 
-                    ? 'border-blue-600 bg-blue-50/50' 
-                    : 'border-slate-200 bg-white hover:border-slate-300'
-                }`}
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-sm text-slate-900">Safe Merge / Append</span>
-                    <input
-                      type="radio"
-                      name="restoreMode"
-                      value="merge"
-                      checked={restoreMode === 'merge'}
-                      onChange={() => setRestoreMode('merge')}
-                      className="text-blue-600 focus:ring-blue-500"
-                    />
-                  </div>
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Retains current data and only inserts missing cost sheets, accounts, and users. Existing IDs are preserved.
-                  </p>
-                </div>
-              </label>
-            </div>
-
-            {/* Safety Confirmation Checkbox */}
-            <div className="pt-2 flex items-start gap-3">
-              <input
-                id="chk-confirm-restore"
-                type="checkbox"
-                checked={confirmSafety}
-                onChange={(e) => setConfirmSafety(e.target.checked)}
-                className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
-              />
-              <label htmlFor="chk-confirm-restore" className="text-xs text-slate-700 cursor-pointer">
-                I understand that this action will execute a system-level database and file restoration.
-                {restoreMode === 'replace' && (
-                  <span className="block text-red-600 font-semibold mt-0.5">
-                    Notice: Clean Replacement will overwrite the current database and file uploads with the backup state.
-                  </span>
-                )}
-              </label>
-            </div>
-
-            <div className="pt-2 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedFile(null);
-                  setInspectionData(null);
-                }}
-                className="px-4 py-2 border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-100 transition"
-              >
-                Cancel
-              </button>
-              <button
-                id="btn-execute-restore"
-                type="button"
-                onClick={handleExecuteRestore}
-                disabled={restoring || !confirmSafety}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg shadow-sm transition disabled:opacity-50"
-              >
-                {restoring ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Restoring Database & Files...
-                  </>
-                ) : (
-                  <>
-                    <ShieldAlert className="w-4 h-4" />
-                    Execute System Restore
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {restoreError && (
-            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
-              <span>{restoreError}</span>
-            </div>
-          )}
-
-          {restoreResult && (
-            <div className="p-5 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl space-y-3">
-              <div className="flex items-center gap-2.5">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                <h4 className="text-sm font-bold">{restoreResult.message}</h4>
-              </div>
-              <p className="text-xs text-emerald-700">
-                Mode applied: <strong>{restoreResult.mode.toUpperCase()}</strong>.
-                All database entities and physical attachments have been successfully restored.
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs pt-1">
-                <div className="bg-emerald-100/70 p-2 rounded">
-                  Cost Sheets: <strong>{restoreResult.stats.cost_sheets ?? 0}</strong>
-                </div>
-                <div className="bg-emerald-100/70 p-2 rounded">
-                  Line Items: <strong>{restoreResult.stats.line_items ?? 0}</strong>
-                </div>
-                <div className="bg-emerald-100/70 p-2 rounded">
-                  Accounts: <strong>{restoreResult.stats.accounts ?? 0}</strong>
-                </div>
-                <div className="bg-emerald-100/70 p-2 rounded">
-                  Files Extracted: <strong>{restoreResult.stats.physical_files_extracted ?? 0}</strong>
-                </div>
-              </div>
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={() => window.location.reload()}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-semibold transition"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  Reload Application to View Restored Data
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 };

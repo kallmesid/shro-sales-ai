@@ -64,47 +64,74 @@ export async function exportBackup(req: AuthRequest, res: Response) {
       return res.status(403).json({ error: 'Access denied. Admin privileges required to export system backups.' });
     }
 
-    console.log(`[Backup] Admin ${user.username} initiated full system backup export...`);
+    const scope = (req.query.scope || req.query.type || 'both').toString().toLowerCase(); // 'both' | 'db' | 'files'
+    console.log(`[Backup] Admin ${user.username} initiated system backup export (Scope: ${scope})...`);
 
-    // Fetch all database tables
-    const [
-      usersRes,
-      teamsRes,
-      teamMembersRes,
-      accountsRes,
-      dropdownsRes,
-      costSheetsRes,
-      lineItemsRes,
-      approvalLogsRes,
-      uploadedFilesRes,
-      notificationsRes
-    ] = await Promise.all([
-      query('SELECT * FROM users ORDER BY id ASC'),
-      query('SELECT * FROM teams ORDER BY id ASC'),
-      query('SELECT * FROM team_members ORDER BY team_id, user_id ASC'),
-      query('SELECT * FROM accounts ORDER BY id ASC'),
-      query('SELECT * FROM dropdown_options ORDER BY id ASC'),
-      query('SELECT * FROM cost_sheets ORDER BY id ASC'),
-      query('SELECT * FROM line_items ORDER BY id ASC'),
-      query('SELECT * FROM approval_logs ORDER BY id ASC'),
-      query('SELECT * FROM uploaded_files ORDER BY id ASC'),
-      query('SELECT * FROM notifications ORDER BY id ASC')
-    ]);
+    // Fetch all database tables if needed
+    let databaseData: any = null;
+    let costSheetsRowsCount = 0;
+    let lineItemsRowsCount = 0;
+    let accountsRowsCount = 0;
+    let usersRowsCount = 0;
+    let teamsRowsCount = 0;
+    let dropdownsRowsCount = 0;
+    let approvalLogsRowsCount = 0;
+    let uploadedFilesRowsCount = 0;
+    let notificationsRowsCount = 0;
 
-    const databaseData = {
-      users: usersRes.rows,
-      teams: teamsRes.rows,
-      team_members: teamMembersRes.rows,
-      accounts: accountsRes.rows,
-      dropdown_options: dropdownsRes.rows,
-      cost_sheets: costSheetsRes.rows,
-      line_items: lineItemsRes.rows,
-      approval_logs: approvalLogsRes.rows,
-      uploaded_files: uploadedFilesRes.rows,
-      notifications: notificationsRes.rows,
-    };
+    if (scope === 'both' || scope === 'db') {
+      const [
+        usersRes,
+        teamsRes,
+        teamMembersRes,
+        accountsRes,
+        dropdownsRes,
+        costSheetsRes,
+        lineItemsRes,
+        approvalLogsRes,
+        uploadedFilesRes,
+        notificationsRes,
+        portalSettingsRes
+      ] = await Promise.all([
+        query('SELECT * FROM users ORDER BY id ASC'),
+        query('SELECT * FROM teams ORDER BY id ASC'),
+        query('SELECT * FROM team_members ORDER BY team_id, user_id ASC'),
+        query('SELECT * FROM accounts ORDER BY id ASC'),
+        query('SELECT * FROM dropdown_options ORDER BY id ASC'),
+        query('SELECT * FROM cost_sheets ORDER BY id ASC'),
+        query('SELECT * FROM line_items ORDER BY id ASC'),
+        query('SELECT * FROM approval_logs ORDER BY id ASC'),
+        query('SELECT * FROM uploaded_files ORDER BY id ASC'),
+        query('SELECT * FROM notifications ORDER BY id ASC'),
+        query('SELECT * FROM portal_settings ORDER BY key ASC').catch(() => ({ rows: [] }))
+      ]);
 
-    // Calculate file stats from physical uploads folder
+      costSheetsRowsCount = costSheetsRes.rows.length;
+      lineItemsRowsCount = lineItemsRes.rows.length;
+      accountsRowsCount = accountsRes.rows.length;
+      usersRowsCount = usersRes.rows.length;
+      teamsRowsCount = teamsRes.rows.length;
+      dropdownsRowsCount = dropdownsRes.rows.length;
+      approvalLogsRowsCount = approvalLogsRes.rows.length;
+      uploadedFilesRowsCount = uploadedFilesRes.rows.length;
+      notificationsRowsCount = notificationsRes.rows.length;
+
+      databaseData = {
+        users: usersRes.rows,
+        teams: teamsRes.rows,
+        team_members: teamMembersRes.rows,
+        accounts: accountsRes.rows,
+        dropdown_options: dropdownsRes.rows,
+        cost_sheets: costSheetsRes.rows,
+        line_items: lineItemsRes.rows,
+        approval_logs: approvalLogsRes.rows,
+        uploaded_files: uploadedFilesRes.rows,
+        notifications: notificationsRes.rows,
+        portal_settings: portalSettingsRes.rows,
+      };
+    }
+
+    // Calculate file stats from physical uploads folder if needed
     let totalFilesOnDisk = 0;
     let totalDiskBytes = 0;
 
@@ -123,10 +150,13 @@ export async function exportBackup(req: AuthRequest, res: Response) {
       }
     }
 
-    scanFolder(uploadDir);
+    if (scope === 'both' || scope === 'files') {
+      scanFolder(uploadDir);
+    }
 
     const metadata = {
       format_version: '1.0',
+      scope, // 'both' | 'db' | 'files'
       exported_at: new Date().toISOString(),
       exported_by: {
         id: user.id,
@@ -138,15 +168,16 @@ export async function exportBackup(req: AuthRequest, res: Response) {
       },
       system: 'SHRO Systems - Cost Sheet Management Portal',
       stats: {
-        cost_sheets: costSheetsRes.rows.length,
-        line_items: lineItemsRes.rows.length,
-        accounts: accountsRes.rows.length,
-        users: usersRes.rows.length,
-        teams: teamsRes.rows.length,
-        dropdown_options: dropdownsRes.rows.length,
-        approval_logs: approvalLogsRes.rows.length,
-        uploaded_files_records: uploadedFilesRes.rows.length,
-        notifications: notificationsRes.rows.length,
+        scope,
+        cost_sheets: costSheetsRowsCount,
+        line_items: lineItemsRowsCount,
+        accounts: accountsRowsCount,
+        users: usersRowsCount,
+        teams: teamsRowsCount,
+        dropdown_options: dropdownsRowsCount,
+        approval_logs: approvalLogsRowsCount,
+        uploaded_files_records: uploadedFilesRowsCount,
+        notifications: notificationsRowsCount,
         physical_files_count: totalFilesOnDisk,
         physical_files_bytes: totalDiskBytes,
         physical_files_formatted: `${(totalDiskBytes / (1024 * 1024)).toFixed(2)} MB`
@@ -155,34 +186,41 @@ export async function exportBackup(req: AuthRequest, res: Response) {
 
     const zip = new AdmZip();
 
-    // 1. Add metadata & database dump
+    // 1. Add metadata
     zip.addFile('backup-metadata.json', Buffer.from(JSON.stringify(metadata, null, 2), 'utf8'));
-    zip.addFile('database-backup.json', Buffer.from(JSON.stringify(databaseData, null, 2), 'utf8'));
 
-    // 2. Recursively add physical files from uploads/ (skipping .temp)
-    if (fs.existsSync(uploadDir)) {
-      const entries = fs.readdirSync(uploadDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.name.startsWith('.')) continue;
-        const itemPath = path.join(uploadDir, entry.name);
-        if (entry.isDirectory()) {
-          zip.addLocalFolder(itemPath, `uploads/${entry.name}`);
-        } else if (entry.isFile()) {
-          zip.addLocalFile(itemPath, 'uploads');
+    // 2. Add database dump if requested
+    if (databaseData) {
+      zip.addFile('database-backup.json', Buffer.from(JSON.stringify(databaseData, null, 2), 'utf8'));
+    }
+
+    // 3. Recursively add physical files from uploads/ if requested
+    if (scope === 'both' || scope === 'files') {
+      if (fs.existsSync(uploadDir)) {
+        const entries = fs.readdirSync(uploadDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.name.startsWith('.')) continue;
+          const itemPath = path.join(uploadDir, entry.name);
+          if (entry.isDirectory()) {
+            zip.addLocalFolder(itemPath, `uploads/${entry.name}`);
+          } else if (entry.isFile()) {
+            zip.addLocalFile(itemPath, 'uploads');
+          }
         }
       }
     }
 
     const zipBuffer = zip.toBuffer();
     const timestampStr = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const fileName = `shro-portal-backup-${timestampStr}.zip`;
+    const fileName = `shro-portal-backup-${scope}-${timestampStr}.zip`;
 
-    console.log(`[Backup] Export archive built successfully: ${fileName} (${(zipBuffer.length / (1024 * 1024)).toFixed(2)} MB)`);
+    console.log(`[Backup] Export archive built successfully: ${fileName} (${(zipBuffer.length / (1024 * 1024)).toFixed(2)} MB, scope=${scope})`);
 
     res.set({
       'Content-Type': 'application/zip',
       'Content-Disposition': `attachment; filename="${fileName}"`,
       'Content-Length': zipBuffer.length.toString(),
+      'X-Backup-Scope': scope,
       'X-Backup-Cost-Sheets': metadata.stats.cost_sheets.toString(),
       'X-Backup-Files': metadata.stats.physical_files_count.toString()
     });
@@ -215,37 +253,8 @@ export async function inspectBackup(req: AuthRequest, res: Response) {
     const zip = new AdmZip(file.path);
     const entries = zip.getEntries();
 
-    let metaEntry = entries.find(e => e.entryName === 'backup-metadata.json');
-    let dbEntry = entries.find(e => e.entryName === 'database-backup.json');
-
-    if (!dbEntry) {
-      fs.unlinkSync(file.path);
-      return res.status(400).json({
-        error: 'Invalid backup archive: "database-backup.json" was not found inside the zip.'
-      });
-    }
-
-    let metadata: any = null;
-    if (metaEntry) {
-      try {
-        metadata = JSON.parse(zip.readAsText(metaEntry));
-      } catch (e) {
-        console.warn('Could not parse backup-metadata.json:', e);
-      }
-    }
-
-    let databaseData: any = {};
-    try {
-      databaseData = JSON.parse(zip.readAsText(dbEntry));
-    } catch (e: any) {
-      fs.unlinkSync(file.path);
-      return res.status(400).json({ error: 'Corrupt database-backup.json in archive: ' + e.message });
-    }
-
-    const tableCounts: { [key: string]: number } = {};
-    for (const [table, rows] of Object.entries(databaseData)) {
-      tableCounts[table] = Array.isArray(rows) ? rows.length : 0;
-    }
+    const metaEntry = entries.find(e => e.entryName === 'backup-metadata.json');
+    const dbEntry = entries.find(e => e.entryName === 'database-backup.json');
 
     const filesInZip: { name: string; size: number }[] = [];
     let totalFilesBytes = 0;
@@ -259,6 +268,34 @@ export async function inspectBackup(req: AuthRequest, res: Response) {
       }
     }
 
+    if (!dbEntry && filesInZip.length === 0) {
+      fs.unlinkSync(file.path);
+      return res.status(400).json({
+        error: 'Invalid backup archive: neither "database-backup.json" nor any uploaded files were found in this zip package.'
+      });
+    }
+
+    let metadata: any = null;
+    if (metaEntry) {
+      try {
+        metadata = JSON.parse(zip.readAsText(metaEntry));
+      } catch (e) {
+        console.warn('Could not parse backup-metadata.json:', e);
+      }
+    }
+
+    const tableCounts: { [key: string]: number } = {};
+    if (dbEntry) {
+      try {
+        const databaseData = JSON.parse(zip.readAsText(dbEntry));
+        for (const [table, rows] of Object.entries(databaseData)) {
+          tableCounts[table] = Array.isArray(rows) ? rows.length : 0;
+        }
+      } catch (e: any) {
+        console.warn('Could not parse database-backup.json:', e.message);
+      }
+    }
+
     // Clean up uploaded zip file
     if (fs.existsSync(file.path)) {
       fs.unlinkSync(file.path);
@@ -266,6 +303,8 @@ export async function inspectBackup(req: AuthRequest, res: Response) {
 
     return res.json({
       valid: true,
+      hasDatabase: !!dbEntry,
+      hasFiles: filesInZip.length > 0,
       metadata: metadata || { exported_at: 'Unknown', system: 'Generic SHRO Backup' },
       tableCounts,
       filesCount: filesInZip.length,
@@ -284,7 +323,7 @@ export async function inspectBackup(req: AuthRequest, res: Response) {
 
 /**
  * RESTORE SYSTEM BACKUP (.ZIP)
- * Restores database records and physical uploaded files.
+ * Restores database records and/or physical uploaded files based on restoreScope.
  */
 export async function restoreBackup(req: AuthRequest, res: Response) {
   const file = req.file;
@@ -300,30 +339,33 @@ export async function restoreBackup(req: AuthRequest, res: Response) {
     }
 
     const mode = (req.body.mode || 'replace').toLowerCase(); // 'replace' | 'merge'
-    console.log(`[Backup] Admin ${user.username} starting system restore (Mode: ${mode})...`);
+    const restoreScope = (req.body.scope || req.body.restoreScope || 'both').toLowerCase(); // 'both' | 'db' | 'files'
+    console.log(`[Backup] Admin ${user.username} starting system restore (Mode: ${mode}, Scope: ${restoreScope})...`);
 
     const zip = new AdmZip(file.path);
     const entries = zip.getEntries();
 
     const dbEntry = entries.find(e => e.entryName === 'database-backup.json');
-    if (!dbEntry) {
+    if ((restoreScope === 'both' || restoreScope === 'db') && !dbEntry) {
       fs.unlinkSync(file.path);
-      return res.status(400).json({ error: 'Invalid backup file: "database-backup.json" missing' });
+      return res.status(400).json({ error: 'Selected restore scope includes Database, but "database-backup.json" was not found inside the zip archive.' });
     }
 
     let databaseData: any = {};
-    try {
-      databaseData = JSON.parse(zip.readAsText(dbEntry));
-    } catch (e: any) {
-      fs.unlinkSync(file.path);
-      return res.status(400).json({ error: 'Corrupt database-backup.json: ' + e.message });
+    if (dbEntry && (restoreScope === 'both' || restoreScope === 'db')) {
+      try {
+        databaseData = JSON.parse(zip.readAsText(dbEntry));
+      } catch (e: any) {
+        fs.unlinkSync(file.path);
+        return res.status(400).json({ error: 'Corrupt database-backup.json: ' + e.message });
+      }
     }
 
     const restoredStats: { [key: string]: number } = {};
 
-    if (mode === 'replace') {
+    if ((restoreScope === 'both' || restoreScope === 'db') && mode === 'replace') {
       // In replace mode, purge existing records in reverse foreign key order
-      console.log('[Backup] Purging existing tables in reverse dependency order...');
+      console.log('[Backup] Purging existing database tables in reverse dependency order...');
       await query('DELETE FROM notifications');
       await query('DELETE FROM uploaded_files');
       await query('DELETE FROM approval_logs');
@@ -333,9 +375,9 @@ export async function restoreBackup(req: AuthRequest, res: Response) {
       await query('DELETE FROM team_members');
       await query('DELETE FROM teams');
       await query('DELETE FROM dropdown_options');
-      // For users: keep current admin account or replace all
       await query('DELETE FROM users');
     }
+
 
     // 1. Users
     if (Array.isArray(databaseData.users)) {
@@ -591,36 +633,58 @@ export async function restoreBackup(req: AuthRequest, res: Response) {
       restoredStats.notifications = count;
     }
 
-    // 11. Extract Physical Files from uploads/ into process.cwd()/uploads/
-    let extractedFileCount = 0;
-    if (mode === 'replace') {
-      // Clean current uploads directory except .temp
-      if (fs.existsSync(uploadDir)) {
-        const currentItems = fs.readdirSync(uploadDir);
-        for (const item of currentItems) {
-          if (item === '.temp') continue;
-          const p = path.join(uploadDir, item);
-          try {
-            fs.rmSync(p, { recursive: true, force: true });
-          } catch (e) {}
+    // 11. Portal Settings (Branding, Email Configurations)
+    if (Array.isArray(databaseData.portal_settings)) {
+      let count = 0;
+      for (const ps of databaseData.portal_settings) {
+        try {
+          const val = typeof ps.value === 'string' ? ps.value : JSON.stringify(ps.value || {});
+          await query(`
+            INSERT INTO portal_settings (key, value, updated_at)
+            VALUES ($1, $2::jsonb, $3)
+            ON CONFLICT (key) DO UPDATE
+            SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+          `, [ps.key, val, ps.updated_at || new Date()]);
+          count++;
+        } catch (e) {
+          console.warn('[Backup] Failed to restore portal setting:', ps.key, e);
         }
       }
+      restoredStats.portal_settings = count;
     }
 
-    for (const entry of entries) {
-      if (entry.entryName.startsWith('uploads/') && !entry.isDirectory) {
-        const relativePath = entry.entryName.substring('uploads/'.length);
-        if (!relativePath || relativePath.startsWith('.')) continue;
-
-        const targetPath = path.join(uploadDir, relativePath);
-        const targetDir = path.dirname(targetPath);
-
-        if (!fs.existsSync(targetDir)) {
-          fs.mkdirSync(targetDir, { recursive: true });
+    // 12. Extract Physical Files from uploads/ into process.cwd()/uploads/
+    let extractedFileCount = 0;
+    if (restoreScope === 'both' || restoreScope === 'files') {
+      if (mode === 'replace') {
+        // Clean current uploads directory except .temp
+        if (fs.existsSync(uploadDir)) {
+          const currentItems = fs.readdirSync(uploadDir);
+          for (const item of currentItems) {
+            if (item === '.temp') continue;
+            const p = path.join(uploadDir, item);
+            try {
+              fs.rmSync(p, { recursive: true, force: true });
+            } catch (e) {}
+          }
         }
+      }
 
-        fs.writeFileSync(targetPath, entry.getData());
-        extractedFileCount++;
+      for (const entry of entries) {
+        if (entry.entryName.startsWith('uploads/') && !entry.isDirectory) {
+          const relativePath = entry.entryName.substring('uploads/'.length);
+          if (!relativePath || relativePath.startsWith('.')) continue;
+
+          const targetPath = path.join(uploadDir, relativePath);
+          const targetDir = path.dirname(targetPath);
+
+          if (!fs.existsSync(targetDir)) {
+            fs.mkdirSync(targetDir, { recursive: true });
+          }
+
+          fs.writeFileSync(targetPath, entry.getData());
+          extractedFileCount++;
+        }
       }
     }
 

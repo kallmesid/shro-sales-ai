@@ -1,36 +1,82 @@
 import nodemailer from 'nodemailer';
+import { query } from '../config/db.ts';
 
-// Configure transporter. In development/sandbox or if no SMTP provided, use simulated/ethereal mode
-let transporter: any = null;
+// Dynamic transporter cache
+let cachedTransporter: any = null;
+let lastConfigHash: string = '';
 
-function getTransporter() {
-  if (!transporter) {
-    if (process.env.SMTP_HOST && process.env.SMTP_USER) {
-      transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT || '587'),
-        secure: process.env.SMTP_SECURE === 'true',
+export async function getEmailConfigSettings() {
+  try {
+    const res = await query("SELECT value FROM portal_settings WHERE key = 'email'");
+    const dbConfig = res.rows[0]?.value || {};
+    
+    return {
+      host: dbConfig.smtp_host || process.env.SMTP_HOST,
+      port: parseInt(dbConfig.smtp_port || process.env.SMTP_PORT || '587', 10),
+      secure: dbConfig.smtp_secure === true || process.env.SMTP_SECURE === 'true',
+      user: dbConfig.smtp_user || process.env.SMTP_USER,
+      pass: dbConfig.smtp_password || process.env.SMTP_PASS,
+      fromEmail: dbConfig.from_email || process.env.SMTP_FROM || dbConfig.smtp_user || process.env.SMTP_USER || 'no-reply@shrosystems.com',
+      fromName: dbConfig.from_name || 'SHRO Quotation Workflow',
+      notifyOnSubmission: dbConfig.notify_on_submission !== false,
+      notifyOnApproval: dbConfig.notify_on_approval !== false,
+      notifyOnRejection: dbConfig.notify_on_rejection !== false,
+    };
+  } catch (err) {
+    console.warn('[EmailService] Falling back to process.env config:', err);
+    return {
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587', 10),
+      secure: process.env.SMTP_SECURE === 'true',
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+      fromEmail: process.env.SMTP_FROM || process.env.SMTP_USER || 'no-reply@shrosystems.com',
+      fromName: 'SHRO Quotation Workflow',
+      notifyOnSubmission: true,
+      notifyOnApproval: true,
+      notifyOnRejection: true,
+    };
+  }
+}
+
+async function getTransporter() {
+  const cfg = await getEmailConfigSettings();
+  const currentHash = `${cfg.host}:${cfg.port}:${cfg.user}:${cfg.secure}:${cfg.pass ? 'haspass' : 'nopass'}`;
+
+  if (!cachedTransporter || currentHash !== lastConfigHash) {
+    lastConfigHash = currentHash;
+    if (cfg.host && cfg.user && cfg.pass) {
+      cachedTransporter = nodemailer.createTransport({
+        host: cfg.host,
+        port: cfg.port,
+        secure: cfg.secure,
         auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
+          user: cfg.user,
+          pass: cfg.pass,
         },
       });
+      console.log(`[EmailService] Configured live SMTP transport with host ${cfg.host}:${cfg.port} as ${cfg.user}`);
     } else {
-      // Test mode transporter (logs message info gracefully)
-      transporter = nodemailer.createTransport({
+      // Test / simulation mode transporter (logs to console cleanly)
+      cachedTransporter = nodemailer.createTransport({
         streamTransport: true,
         newline: 'unix',
         buffer: true,
       });
+      console.log('[EmailService] Using simulated email transporter (no live SMTP credentials provided)');
     }
   }
-  return transporter;
+  return { transporter: cachedTransporter, config: cfg };
 }
 
 export async function sendApprovalRequestEmail(approverEmail: string, approverName: string, csNumber: string, subject: string, stageName: string, totalSale: number, margin: number) {
   try {
-    const t = getTransporter();
-    const fromAddress = process.env.SMTP_FROM || `"SHRO Quotation Workflow" <${process.env.SMTP_USER || 'no-reply@shrosystems.com'}>`;
+    const { transporter: t, config: cfg } = await getTransporter();
+    if (!cfg.notifyOnSubmission && stageName.includes('Stage 1')) {
+      return;
+    }
+
+    const fromAddress = `"${cfg.fromName}" <${cfg.fromEmail}>`;
     const appUrl = process.env.APP_URL || 'http://localhost:3000';
 
     const mailOptions = {
@@ -69,11 +115,16 @@ export async function sendApprovalRequestEmail(approverEmail: string, approverNa
 
 export async function sendDecisionNotificationEmail(initiatorEmail: string, initiatorName: string, csNumber: string, subject: string, decision: 'Approved' | 'Rejected', stageName: string, actorName: string, comment?: string) {
   try {
-    const t = getTransporter();
+    const { transporter: t, config: cfg } = await getTransporter();
+    
+    // Check preferences
+    if (decision === 'Approved' && !cfg.notifyOnApproval) return;
+    if (decision === 'Rejected' && !cfg.notifyOnRejection) return;
+
     const isApproved = decision === 'Approved';
     const color = isApproved ? '#16a34a' : '#dc2626';
 
-    const fromAddress = process.env.SMTP_FROM || `"SHRO Quotation Workflow" <${process.env.SMTP_USER || 'no-reply@shrosystems.com'}>`;
+    const fromAddress = `"${cfg.fromName}" <${cfg.fromEmail}>`;
     const appUrl = process.env.APP_URL || 'http://localhost:3000';
 
     const mailOptions = {

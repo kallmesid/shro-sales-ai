@@ -39,6 +39,8 @@ export default function App() {
   const [selectedCostSheetId, setSelectedCostSheetId] = useState<number | null>(null);
   const [isNewSheetModalOpen, setIsNewSheetModalOpen] = useState(false);
   const [isSudoModalOpen, setIsSudoModalOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarPinned, setIsSidebarPinned] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Check initial authentication
@@ -199,13 +201,17 @@ export default function App() {
 
   return (
     <div id="app-root-layout" className="flex h-screen w-screen overflow-hidden bg-slate-100 font-sans text-slate-900">
-      {/* Permanent Left Navigation Sidebar */}
+      {/* Pop-up / Hidden-by-default Left Navigation Sidebar */}
       <Sidebar
         currentTab={currentTab}
         onTabChange={(tab) => setCurrentTab(tab)}
         user={currentUser}
         onNewCostSheet={() => setIsNewSheetModalOpen(true)}
         pendingApprovalsCount={pendingApprovalsCount}
+        isOpen={isSidebarOpen}
+        isPinned={isSidebarPinned}
+        onClose={() => setIsSidebarOpen(false)}
+        onTogglePin={() => setIsSidebarPinned(prev => !prev)}
       />
 
       {/* Main View Area */}
@@ -219,6 +225,7 @@ export default function App() {
           onExitSudo={handleExitSudo}
           onSelectCostSheet={(id) => setSelectedCostSheetId(id)}
           onOpenSudoModal={() => setIsSudoModalOpen(true)}
+          onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
         />
 
         {/* Dynamic Tab Body */}
@@ -230,6 +237,8 @@ export default function App() {
               onNewCostSheet={() => setIsNewSheetModalOpen(true)}
               dropdowns={dropdowns}
               salespeople={salespeople}
+              currentUser={currentUser}
+              accounts={accounts}
             />
           )}
 
@@ -250,7 +259,7 @@ export default function App() {
             />
           )}
 
-          {currentTab === 'reports' && (
+          {currentTab === 'reports' && ['Admin', 'Management', 'TeamLead'].includes(currentUser.access_level) && (
             <ReportsView
               dropdowns={dropdowns}
               salespeople={salespeople}
@@ -264,6 +273,27 @@ export default function App() {
               onSudoLogin={handleSudoLogin}
               onDropdownsUpdated={loadMasterData}
               dropdowns={dropdowns}
+              initialTab="users"
+            />
+          )}
+
+          {currentTab === 'email' && currentUser.access_level === 'Admin' && (
+            <AdminView
+              currentUser={currentUser}
+              onSudoLogin={handleSudoLogin}
+              onDropdownsUpdated={loadMasterData}
+              dropdowns={dropdowns}
+              initialTab="email"
+            />
+          )}
+
+          {currentTab === 'backup' && currentUser.access_level === 'Admin' && (
+            <AdminView
+              currentUser={currentUser}
+              onSudoLogin={handleSudoLogin}
+              onDropdownsUpdated={loadMasterData}
+              dropdowns={dropdowns}
+              initialTab="backup"
             />
           )}
         </main>

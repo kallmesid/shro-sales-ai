@@ -6,6 +6,7 @@ import {
   createAccount,
   updateAccount,
   deleteAccount,
+  batchCreateAccounts,
 } from '../controllers/accountController.ts';
 import { verifyJWT } from '../middleware/auth.ts';
 
@@ -14,6 +15,7 @@ const router = Router();
 router.use(verifyJWT);
 
 router.get('/', getAllAccounts);
+router.post('/batch', batchCreateAccounts);
 router.get('/:id', getAccountById);
 
 router.post(

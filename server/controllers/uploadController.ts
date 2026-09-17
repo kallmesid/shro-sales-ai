@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { query } from '../config/db.ts';
 import { AuthRequest } from '../middleware/auth.ts';
-import { parsePdfBuffer } from '../services/pdfParserService.ts';
+import { parsePdfBuffer, parseCostSheetFromPdf } from '../services/pdfParserService.ts';
 
 const uploadDir = path.join(process.cwd(), 'uploads');
 const tempDir = path.join(uploadDir, '.temp');
@@ -309,7 +309,7 @@ export async function parsePdfForLineItems(req: AuthRequest, res: Response) {
     }
 
     const fileBuffer = fs.readFileSync(file.path);
-    const parsedLineItems = await parsePdfBuffer(fileBuffer);
+    const parsedData = await parseCostSheetFromPdf(fileBuffer);
 
     // Clean up temporary PDF immediately after parsing
     if (fs.existsSync(file.path)) {
@@ -317,8 +317,9 @@ export async function parsePdfForLineItems(req: AuthRequest, res: Response) {
     }
 
     return res.json({
-      message: `Parsed ${parsedLineItems.length} candidate line items from PDF.`,
-      items: parsedLineItems
+      message: `Parsed ${parsedData.items.length} line items from PDF with full deal metadata.`,
+      sheet: parsedData,
+      items: parsedData.items,
     });
   } catch (error: any) {
     console.error('PDF parsing error in uploadController:', error);

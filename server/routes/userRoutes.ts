@@ -7,6 +7,9 @@ import {
   getApproverCandidates,
   getTeams,
   createTeam,
+  bulkUpdateUsers,
+  bulkDeleteUsers,
+  importUsersFromExcel,
 } from '../controllers/userController.ts';
 import { verifyJWT, requireAdmin } from '../middleware/auth.ts';
 
@@ -20,6 +23,9 @@ router.get('/teams', getTeams);
 
 // Admin-only user management
 router.get('/', requireAdmin, getAllUsers);
+router.post('/bulk-update', requireAdmin, bulkUpdateUsers);
+router.post('/bulk-delete', requireAdmin, bulkDeleteUsers);
+router.post('/import-excel', requireAdmin, importUsersFromExcel);
 router.post(
   '/',
   requireAdmin,
