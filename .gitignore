@@ -6,3 +6,4 @@ coverage/
 *.log
 .env*
 !.env.example
+podman-compose.demo.local.yml
