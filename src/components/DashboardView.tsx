@@ -22,7 +22,9 @@ import {
   Briefcase,
   ChevronRight,
   ShieldCheck,
-  Maximize2
+  Maximize2,
+  IndianRupee,
+  FileEdit
 } from 'lucide-react';
 import { apiRequest } from '../lib/api.ts';
 import { User, DropdownOptions, Account } from '../types.ts';
@@ -209,13 +211,40 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     { num: '12', name: 'December' },
   ];
 
-  const kpi = stats?.kpis || { total_deal_value: 0, total_purchase: 0, total_profit: 0, avg_margin: 0, total_count: 0 };
+  const kpi = stats?.kpis || { 
+    total_deal_value: 0, 
+    total_purchase: 0, 
+    total_profit: 0, 
+    avg_margin: 0, 
+    overall_margin: 0,
+    total_count: 0,
+    draft_count: 0,
+    pending_count: 0,
+    approved_count: 0,
+    rejected_count: 0
+  };
   const trend = stats?.monthly_trend || [];
   const salespersonPerf = stats?.salesperson_performance || [];
   const statusDist = stats?.status_distribution || [];
+  const buDist = stats?.business_unit_distribution || [];
   const oemDist = stats?.oem_distribution || [];
   const topAccounts = stats?.top_accounts || [];
+  const userPerf = stats?.user_performance || [];
   const recentSheets = stats?.recent_sheets || [];
+
+  const fmtCompact = (n: number | string) => {
+    const num = Number(n || 0);
+    const sign = num < 0 ? '-' : '';
+    const abs = Math.abs(num);
+    const trim = (x: number) => {
+      const r = Math.round(x * 100) / 100;
+      return r % 1 === 0 ? r.toString() : r.toFixed(2).replace(/0$/, '');
+    };
+    if (abs >= 1e7) return `${sign}₹${trim(abs / 1e7)} Cr`;
+    if (abs >= 1e5) return `${sign}₹${trim(abs / 1e5)} Lakh`;
+    if (abs >= 1e3) return `${sign}₹${trim(abs / 1e3)} K`;
+    return `${sign}₹${trim(abs)}`;
+  };
 
   // Calculation for Doughnut Chart SVG
   const totalStatusCount = statusDist.reduce((acc: number, curr: any) => acc + parseInt(curr.count, 10), 0) || 1;
@@ -569,135 +598,179 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* Primary KPI Tiles (Clickable to open in-depth insights) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        {/* KPI 1: Total Deal Value */}
+      {/* Primary KPI Summary Tiles (8 Tiles matching reference dashboard: Total, Draft, Pending, Approved, Rejected, Total Sale, Total Profit, Margin %) */}
+      <div id="dash-summary" className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+        {/* 1. Total Cost Sheets */}
         <div 
-          id="kpi-total-deal-value" 
-          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-blue-500 hover:shadow-md transition cursor-pointer group relative overflow-hidden"
-          onClick={() => openInsights('gross_deal_value')}
-          title="Click to view In-Depth Gross Deal Value & Revenue Composition Insights"
+          id="kpi-total-cost-sheets" 
+          className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-blue-500 hover:shadow-md transition cursor-pointer group flex flex-col justify-between"
+          onClick={() => openInsights('recent_quotes')}
+          title="Total cost sheets in active scope"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Gross Deal Value</span>
-            <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition shadow-2xs">
-              <DollarSign className="w-4 h-4" />
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total Sheets</span>
+            <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition shadow-2xs">
+              <FileText className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="mt-3">
-            <p className="text-2xl font-extrabold text-slate-900 tracking-tight">
-              ₹{Number(kpi.total_deal_value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+          <div className="mt-2">
+            <p className="text-xl font-extrabold text-slate-900 tracking-tight">
+              {kpi.total_count}
             </p>
-            <div className="flex items-center justify-between mt-1 text-[11px] text-slate-500">
-              <span>Purchase: ₹{Number(kpi.total_purchase).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-              <span className="text-[10px] text-blue-600 font-bold opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5">
-                Insights <ArrowUpRight className="w-3 h-3" />
-              </span>
-            </div>
+            <p className="text-[10px] text-slate-400 mt-0.5 truncate">All records</p>
           </div>
         </div>
 
-        {/* KPI 2: Total Profit */}
+        {/* 2. Draft */}
         <div 
-          id="kpi-total-profit" 
-          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-emerald-500 hover:shadow-md transition cursor-pointer group relative overflow-hidden"
-          onClick={() => openInsights('net_profit')}
-          title="Click to view In-Depth Net Profit & Yield Breakdown Insights"
+          id="kpi-draft-count" 
+          className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-slate-500 hover:shadow-md transition cursor-pointer group flex flex-col justify-between"
+          onClick={() => openInsights('draft_deals')}
+          title="Draft quotations under preparation"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Net Profit</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition shadow-2xs">
-              <TrendingUp className="w-4 h-4" />
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Draft</span>
+            <div className="w-7 h-7 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center group-hover:bg-slate-700 group-hover:text-white transition shadow-2xs">
+              <FileEdit className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="mt-3">
-            <p className="text-2xl font-extrabold text-emerald-600 tracking-tight">
-              ₹{Number(kpi.total_profit).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+          <div className="mt-2">
+            <p className="text-xl font-extrabold text-slate-700 tracking-tight">
+              {kpi.draft_count}
             </p>
-            <div className="flex items-center justify-between mt-1 text-[11px] text-slate-500">
-              <span>Net profit after vendor rebates</span>
-              <span className="text-[10px] text-emerald-600 font-bold opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5">
-                Insights <ArrowUpRight className="w-3 h-3" />
-              </span>
-            </div>
+            <p className="text-[10px] text-slate-400 mt-0.5 truncate">In progress</p>
           </div>
         </div>
 
-        {/* KPI 3: Average Margin % */}
-        <div 
-          id="kpi-average-margin" 
-          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-indigo-500 hover:shadow-md transition cursor-pointer group relative overflow-hidden"
-          onClick={() => openInsights('average_margin')}
-          title="Click to view In-Depth Margin Health & Distribution Insights"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Average Margin</span>
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition shadow-2xs">
-              <Percent className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <p className="text-2xl font-extrabold text-indigo-600 tracking-tight">
-              {Number(kpi.avg_margin).toFixed(2)}%
-            </p>
-            <div className="flex items-center justify-between mt-1 text-[11px] text-slate-500">
-              <span>Target: ≥ 18.00%</span>
-              <span className="text-[10px] text-indigo-600 font-bold opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5">
-                Insights <ArrowUpRight className="w-3 h-3" />
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* KPI 4: Pending Approvals */}
+        {/* 3. Pending Approval */}
         <div 
           id="kpi-pending-approvals" 
-          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-amber-500 hover:shadow-md transition cursor-pointer group relative overflow-hidden"
+          className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-orange-500 hover:shadow-md transition cursor-pointer group flex flex-col justify-between"
           onClick={() => openInsights('pending_approvals')}
-          title="Click to view 6-Stage Sequential Approval Bottleneck Insights"
+          title="Cost sheets awaiting sequential approval"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Awaiting Signoff</span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center group-hover:bg-amber-600 group-hover:text-white transition shadow-2xs">
-              <Clock className="w-4 h-4" />
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Pending</span>
+            <div className="w-7 h-7 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center group-hover:bg-orange-500 group-hover:text-white transition shadow-2xs">
+              <Clock className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="mt-3">
-            <p className="text-2xl font-extrabold text-amber-600 tracking-tight">
-              {pendingItem ? pendingItem.count : 0}
+          <div className="mt-2">
+            <p className="text-xl font-extrabold text-orange-600 tracking-tight">
+              {kpi.pending_count}
             </p>
-            <div className="flex items-center justify-between mt-1 text-[11px] text-slate-500">
-              <span>₹{Number(pendingItem?.total_sale || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-              <span className="text-[10px] text-amber-600 font-bold opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5">
-                6 Stages <ArrowUpRight className="w-3 h-3" />
-              </span>
-            </div>
+            <p className="text-[10px] text-orange-500 font-medium mt-0.5 truncate">Awaiting sign-off</p>
           </div>
         </div>
 
-        {/* KPI 5: Approved Deals */}
+        {/* 4. Approved */}
         <div 
           id="kpi-approved-deals" 
-          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-emerald-500 hover:shadow-md transition cursor-pointer group relative overflow-hidden"
+          className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-emerald-500 hover:shadow-md transition cursor-pointer group flex flex-col justify-between"
           onClick={() => openInsights('approved_deals')}
-          title="Click to view In-Depth Approved Quotes & Commercial Cleared Deals"
+          title="Approved and commercially cleared cost sheets"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Approved Quotes</span>
-            <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition shadow-2xs">
-              <CheckCircle2 className="w-4 h-4" />
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Approved</span>
+            <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition shadow-2xs">
+              <CheckCircle2 className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="mt-3">
-            <p className="text-2xl font-extrabold text-emerald-600 tracking-tight">
-              {approvedItem ? approvedItem.count : 0}
+          <div className="mt-2">
+            <p className="text-xl font-extrabold text-emerald-600 tracking-tight">
+              {kpi.approved_count}
             </p>
-            <div className="flex items-center justify-between mt-1 text-[11px] text-slate-500">
-              <span>₹{Number(approvedItem?.total_sale || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-              <span className="text-[10px] text-emerald-600 font-bold opacity-0 group-hover:opacity-100 transition flex items-center gap-0.5">
-                Insights <ArrowUpRight className="w-3 h-3" />
-              </span>
+            <p className="text-[10px] text-emerald-600 font-medium mt-0.5 truncate">Fully cleared</p>
+          </div>
+        </div>
+
+        {/* 5. Rejected */}
+        <div 
+          id="kpi-rejected-deals" 
+          className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-rose-500 hover:shadow-md transition cursor-pointer group flex flex-col justify-between"
+          onClick={() => openInsights('rejected_deals')}
+          title="Rejected cost sheets"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Rejected</span>
+            <div className="w-7 h-7 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center group-hover:bg-rose-600 group-hover:text-white transition shadow-2xs">
+              <XCircle className="w-3.5 h-3.5" />
             </div>
+          </div>
+          <div className="mt-2">
+            <p className="text-xl font-extrabold text-rose-600 tracking-tight">
+              {kpi.rejected_count}
+            </p>
+            <p className="text-[10px] text-rose-500 font-medium mt-0.5 truncate">Declined</p>
+          </div>
+        </div>
+
+        {/* 6. Total Sale */}
+        <div 
+          id="kpi-total-deal-value" 
+          className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-purple-500 hover:shadow-md transition cursor-pointer group flex flex-col justify-between"
+          onClick={() => openInsights('gross_deal_value')}
+          title={`Total Sale: ₹${Number(kpi.total_deal_value).toLocaleString('en-IN')}`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total Sale</span>
+            <div className="w-7 h-7 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center group-hover:bg-purple-600 group-hover:text-white transition shadow-2xs">
+              <IndianRupee className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="mt-2">
+            <p className="text-xl font-extrabold text-purple-700 tracking-tight">
+              {fmtCompact(kpi.total_deal_value)}
+            </p>
+            <p className="text-[10px] text-slate-400 mt-0.5 truncate" title={`₹${Number(kpi.total_deal_value).toLocaleString('en-IN')}`}>
+              ₹{Number(kpi.total_deal_value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            </p>
+          </div>
+        </div>
+
+        {/* 7. Total Profit */}
+        <div 
+          id="kpi-total-profit" 
+          className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-cyan-500 hover:shadow-md transition cursor-pointer group flex flex-col justify-between"
+          onClick={() => openInsights('net_profit')}
+          title={`Total Profit: ₹${Number(kpi.total_profit).toLocaleString('en-IN')}`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total Profit</span>
+            <div className="w-7 h-7 rounded-lg bg-cyan-50 text-cyan-600 flex items-center justify-center group-hover:bg-cyan-600 group-hover:text-white transition shadow-2xs">
+              <TrendingUp className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="mt-2">
+            <p className="text-xl font-extrabold text-cyan-600 tracking-tight">
+              {fmtCompact(kpi.total_profit)}
+            </p>
+            <p className="text-[10px] text-slate-400 mt-0.5 truncate" title={`₹${Number(kpi.total_profit).toLocaleString('en-IN')}`}>
+              ₹{Number(kpi.total_profit).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            </p>
+          </div>
+        </div>
+
+        {/* 8. Margin % */}
+        <div 
+          id="kpi-average-margin" 
+          className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-amber-500 hover:shadow-md transition cursor-pointer group flex flex-col justify-between"
+          onClick={() => openInsights('average_margin')}
+          title={`Overall Margin: ${Number(kpi.overall_margin || kpi.avg_margin).toFixed(2)}%, Avg Margin: ${Number(kpi.avg_margin).toFixed(2)}%`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Margin %</span>
+            <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center group-hover:bg-amber-600 group-hover:text-white transition shadow-2xs">
+              <Percent className="w-3.5 h-3.5" />
+            </div>
+          </div>
+          <div className="mt-2">
+            <p className="text-xl font-extrabold text-amber-600 tracking-tight">
+              {Number(kpi.overall_margin || kpi.avg_margin).toFixed(1)}%
+            </p>
+            <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+              Avg: {Number(kpi.avg_margin).toFixed(1)}%
+            </p>
           </div>
         </div>
       </div>
@@ -892,9 +965,70 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* OEM Breakdown & Top Accounts Row */}
+      {/* Secondary Analytics Row: Business Unit Revenue, OEM Revenue & Salesperson Performance */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {/* OEM / Brand Distribution (Clickable to inspect OEM) */}
+        {/* Card 1: Business Unit Revenue (Clickable to inspect BU) */}
+        <div id="chart-bu-distribution" className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-indigo-300 transition">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Business Unit Revenue</h3>
+              <p className="text-xs text-slate-500">Revenue contribution per business division</p>
+            </div>
+            <button
+              onClick={() => openInsights('business_unit_distribution')}
+              className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-full border border-indigo-200 flex items-center gap-1 transition cursor-pointer"
+              title="Open Business Unit Revenue Insights"
+            >
+              <span>BU Insights</span>
+              <ArrowUpRight className="w-3 h-3" />
+            </button>
+          </div>
+
+          <div className="space-y-3 pt-1">
+            {buDist.length === 0 ? (
+              <div className="text-center py-6 text-xs text-slate-400">No Business Unit data available</div>
+            ) : (
+              buDist.map((item: any, i: number) => {
+                const maxBuSale = Math.max(...buDist.map((b: any) => parseFloat(b.total_sale) || 0), 1);
+                const width = Math.max(8, Math.min(100, (parseFloat(item.total_sale) / maxBuSale) * 100));
+                const isSelected = businessUnit === item.business_unit;
+
+                return (
+                  <div 
+                    key={i} 
+                    onClick={() => openInsights('business_unit_distribution', undefined, item.business_unit)}
+                    className={`p-2 rounded-xl transition cursor-pointer group ${
+                      isSelected ? 'bg-indigo-50 border border-indigo-300' : 'hover:bg-slate-50'
+                    }`}
+                    title={`Click to inspect ${item.business_unit} deals in-depth`}
+                  >
+                    <div className="flex justify-between text-xs font-semibold text-slate-800">
+                      <span className="truncate max-w-[200px]" title={item.business_unit}>{item.business_unit}</span>
+                      <span className="flex items-center gap-1 shrink-0">
+                        ₹{Number(item.total_sale).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        <ArrowUpRight className="w-3 h-3 text-indigo-500 opacity-0 group-hover:opacity-100 transition" />
+                      </span>
+                    </div>
+                    <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden mt-1.5">
+                      <div 
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          isSelected ? 'bg-indigo-600' : 'bg-indigo-500'
+                        }`}
+                        style={{ width: `${width}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+                      <span>{item.count} quote{item.count !== 1 ? 's' : ''}</span>
+                      <span className="text-emerald-600 font-medium">Profit: ₹{Number(item.total_profit || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Card 2: OEM / Brand Distribution (Clickable to inspect OEM) */}
         <div id="chart-oem-distribution" className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-orange-300 transition">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -955,7 +1089,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Salesperson Leaderboard (Clickable to inspect Salesperson) */}
+        {/* Card 3: Salesperson Leaderboard (Clickable to inspect Salesperson) */}
         <div id="chart-salesperson-performance" className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-cyan-300 transition">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -1013,52 +1147,252 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             )}
           </div>
         </div>
+      </div>
 
-        {/* Top Customer Accounts (Clickable to inspect Account) */}
-        <div id="chart-top-accounts" className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-indigo-300 transition">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">Key Customer Accounts</h3>
-              <p className="text-xs text-slate-500">Highest value enterprise clients</p>
+      {/* Side-by-Side Summary Tables: Cost Sheets by Customer & Cost Sheets by Salesperson */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Cost Sheets by Customer */}
+        <div id="table-cost-sheets-by-customer" className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/60">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                <Users className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900">Cost Sheets by Customer</h3>
             </div>
             <button
               onClick={() => openInsights('top_accounts')}
-              className="text-[10px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-full border border-indigo-200 flex items-center gap-1 transition cursor-pointer"
-              title="Open Enterprise Accounts Insights"
+              className="text-[10px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-full border border-blue-200 flex items-center gap-1 transition cursor-pointer"
             >
-              <span>Account Insights</span>
+              <span>Customer Insights</span>
               <ArrowUpRight className="w-3 h-3" />
             </button>
           </div>
-
-          <div className="space-y-2.5 pt-1">
-            {topAccounts.length === 0 ? (
-              <div className="text-center py-6 text-xs text-slate-400">No account activity recorded</div>
-            ) : (
-              topAccounts.map((acc: any, i: number) => {
-                return (
-                  <div 
-                    key={i} 
-                    className="p-2 rounded-xl hover:bg-slate-50 transition cursor-pointer border border-transparent hover:border-slate-200 group"
-                    onClick={() => openInsights('top_accounts', undefined, acc.account_name)}
-                    title={`Click to view in-depth account intelligence for ${acc.account_name}`}
-                  >
-                    <div className="flex justify-between text-xs font-semibold text-slate-800">
-                      <span className="truncate">{acc.account_name}</span>
-                      <span className="text-slate-900 flex items-center gap-1">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50/30 text-[11px] font-semibold text-slate-500">
+                  <th className="py-2.5 px-4">Customer</th>
+                  <th className="py-2.5 px-3 text-center">Cost Sheets</th>
+                  <th className="py-2.5 px-4 text-right">Total Value</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {topAccounts.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="py-6 text-center text-xs text-slate-400">No customer records available</td>
+                  </tr>
+                ) : (
+                  topAccounts.slice(0, 8).map((acc: any, i: number) => (
+                    <tr 
+                      key={i} 
+                      onClick={() => openInsights('top_accounts', undefined, acc.account_name)}
+                      className="hover:bg-slate-50 transition cursor-pointer group"
+                    >
+                      <td className="py-2.5 px-4 font-medium text-slate-800">
+                        <span className="truncate max-w-[220px] block group-hover:text-blue-600 transition" title={acc.account_name}>
+                          {acc.account_name}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-center text-slate-600 font-semibold">
+                        {acc.deal_count}
+                      </td>
+                      <td className="py-2.5 px-4 text-right font-bold text-slate-900">
                         ₹{Number(acc.total_value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                        <ArrowUpRight className="w-3 h-3 text-indigo-500 opacity-0 group-hover:opacity-100 transition" />
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-                      <span>{acc.deal_count} deal{acc.deal_count !== 1 ? 's' : ''}</span>
-                      <span className="text-indigo-600 font-medium">Avg Margin: {Number(acc.avg_margin).toFixed(1)}%</span>
-                    </div>
-                  </div>
-                );
-              })
-            )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
+        </div>
+
+        {/* Cost Sheets by Salesperson */}
+        <div id="table-cost-sheets-by-salesperson" className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/60">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <UserIcon className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900">Cost Sheets by Salesperson</h3>
+            </div>
+            <button
+              onClick={() => openInsights('salesperson_performance')}
+              className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-full border border-emerald-200 flex items-center gap-1 transition cursor-pointer"
+            >
+              <span>Rep Insights</span>
+              <ArrowUpRight className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50/30 text-[11px] font-semibold text-slate-500">
+                  <th className="py-2.5 px-4">Salesperson</th>
+                  <th className="py-2.5 px-3 text-center">Cost Sheets</th>
+                  <th className="py-2.5 px-4 text-right">Total Value</th>
+                  <th className="py-2.5 px-4 text-right">Profit</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {salespersonPerf.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-6 text-center text-xs text-slate-400">No salesperson records available</td>
+                  </tr>
+                ) : (
+                  salespersonPerf.slice(0, 8).map((sp: any, i: number) => (
+                    <tr 
+                      key={i} 
+                      onClick={() => openInsights('salesperson_performance', sp.salesperson_id?.toString(), sp.salesperson_name)}
+                      className="hover:bg-slate-50 transition cursor-pointer group"
+                    >
+                      <td className="py-2.5 px-4 font-medium text-slate-800">
+                        <span className="truncate max-w-[180px] block group-hover:text-emerald-600 transition" title={sp.salesperson_name}>
+                          {sp.salesperson_name}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-center text-slate-600 font-semibold">
+                        {sp.deal_count}
+                      </td>
+                      <td className="py-2.5 px-4 text-right font-bold text-slate-900">
+                        ₹{Number(sp.total_deal_value).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </td>
+                      <td className="py-2.5 px-4 text-right font-semibold text-emerald-600">
+                        ₹{Number(sp.total_profit).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* Performance by User Table (Matching Reference Dashboard) */}
+      <div id="table-performance-by-user" className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="p-4 md:p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
+          <div>
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-blue-600" />
+              <h3 className="text-sm font-bold text-slate-900">Performance by User</h3>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Track user deal creation, pipeline stages, commercial yield, and active approval responsibilities
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 bg-white px-3 py-1 rounded-xl border border-slate-200 shadow-2xs font-medium">
+              {userPerf.length} active user{userPerf.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[950px]">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                <th className="py-3 px-4">User</th>
+                <th className="py-3 px-3">Dept / Role</th>
+                <th className="py-3 px-2.5 text-center">Total</th>
+                <th className="py-3 px-2.5 text-center">Draft</th>
+                <th className="py-3 px-2.5 text-center">Pending</th>
+                <th className="py-3 px-2.5 text-center">Approved</th>
+                <th className="py-3 px-2.5 text-center">Rejected</th>
+                <th className="py-3 px-4 text-right">Total Sale</th>
+                <th className="py-3 px-4 text-right">Total Profit</th>
+                <th className="py-3 px-3 text-center">Avg Margin</th>
+                <th className="py-3 px-4 text-center">Awaiting Approval</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-xs text-slate-700">
+              {userPerf.length === 0 ? (
+                <tr>
+                  <td colSpan={11} className="py-8 text-center text-xs text-slate-400">
+                    No user performance records found
+                  </td>
+                </tr>
+              ) : (
+                userPerf.map((u: any) => {
+                  const awaitingCount = parseInt(u.awaiting_approval_count || 0, 10);
+                  const isCurrent = currentUser?.id === u.user_id;
+
+                  return (
+                    <tr 
+                      key={u.user_id}
+                      onClick={() => openInsights('user_performance', u.user_id?.toString(), u.user_name)}
+                      className={`hover:bg-slate-50 transition cursor-pointer group ${
+                        isCurrent ? 'bg-blue-50/30' : ''
+                      }`}
+                      title={`Click to view performance dossier and quotes for ${u.user_name}`}
+                    >
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-slate-900 group-hover:text-blue-600 transition">
+                            {u.user_name}
+                          </span>
+                          {u.access_level === 'Admin' && (
+                            <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-bold border border-purple-200">
+                              Admin
+                            </span>
+                          )}
+                          {isCurrent && (
+                            <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold">
+                              You
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[11px] font-medium">
+                          {u.dept_role || 'Staff'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-2.5 text-center font-bold text-slate-900">
+                        {u.total_count}
+                      </td>
+                      <td className="py-3 px-2.5 text-center text-slate-500 font-medium">
+                        {u.draft_count}
+                      </td>
+                      <td className="py-3 px-2.5 text-center text-orange-600 font-semibold">
+                        {u.pending_count}
+                      </td>
+                      <td className="py-3 px-2.5 text-center text-emerald-600 font-semibold">
+                        {u.approved_count}
+                      </td>
+                      <td className="py-3 px-2.5 text-center text-rose-600 font-medium">
+                        {u.rejected_count}
+                      </td>
+                      <td className="py-3 px-4 text-right font-bold text-slate-900">
+                        ₹{Number(u.total_sale || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </td>
+                      <td className="py-3 px-4 text-right font-semibold text-emerald-600">
+                        ₹{Number(u.total_profit || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        <span className={`font-semibold ${
+                          parseFloat(u.avg_margin) < 10 ? 'text-rose-600' : 'text-slate-800'
+                        }`}>
+                          {Number(u.avg_margin || 0).toFixed(1)}%
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        {awaitingCount > 0 ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                            <Clock className="w-3 h-3 text-amber-700" />
+                            {awaitingCount} pending
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-medium text-xs">0</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 

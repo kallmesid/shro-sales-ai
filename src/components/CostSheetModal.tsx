@@ -22,7 +22,9 @@ import {
   Paperclip,
   ArrowRight,
   ShieldCheck,
-  Check
+  Check,
+  Tag,
+  TrendingUp
 } from 'lucide-react';
 import { CostSheet, LineItem, User, Account, DropdownOptions, UploadedFile } from '../types.ts';
 import { STAGE_NAMES, STAGE_SHORT_NAMES, STAGE_DESCRIPTIONS } from '../lib/constants.ts';
@@ -91,19 +93,10 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
       '5': approverCandidates[5]?.[0]?.id || 6,
       '6': approverCandidates[6]?.[0]?.id || 7,
     },
-    line_items: [
-      {
-        description: 'Server / Core Switch Hardware',
-        unit_purchase: 120000,
-        unit_sale: 155000,
-        quantity: 1,
-        total_purchase: 120000,
-        total_sale: 155000,
-        margin_percentage: 22.58,
-      },
-    ],
+    line_items: [],
   });
 
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [fullCostSheet, setFullCostSheet] = useState<CostSheet | null>(null);
 
   // Load existing cost sheet if editing
@@ -119,10 +112,22 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
     try {
       const data = await apiRequest(`/api/cost-sheets/${id}`);
       setFullCostSheet(data);
+      const normalizedItems = (data.line_items || []).map((item: any) => ({
+        ...item,
+        unit_purchase: Number(item.unit_purchase) || 0,
+        unit_sale: Number(item.unit_sale) || 0,
+        quantity: Number(item.quantity) || 1,
+        total_purchase: Number(item.total_purchase) || 0,
+        total_sale: Number(item.total_sale) || 0,
+        margin_percentage: Number(item.margin_percentage) || 0,
+      }));
       setSheetData({
         ...data,
+        discount_value: Number(data.discount_value) || 0,
+        consultation_charges: Number(data.consultation_charges) || 0,
+        freight_charges: Number(data.freight_charges) || 0,
         assigned_approvers: data.assigned_approvers || {},
-        line_items: data.line_items || [],
+        line_items: normalizedItems,
       });
     } catch (err: any) {
       setError(err.message || 'Failed to load cost sheet');
@@ -134,29 +139,37 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
   // Recalculate financial figures whenever line items, discounts, or charges change
   const computeTotals = () => {
     const items = sheetData.line_items || [];
-    const totalPurchase = items.reduce((sum, item) => sum + (Number(item.total_purchase) || 0), 0);
-    const totalSale = items.reduce((sum, item) => sum + (Number(item.total_sale) || 0), 0);
+    const totalPurchase = items.reduce((sum, item) => sum + (Number(item.total_purchase) || (Number(item.unit_purchase || 0) * Number(item.quantity || 1))), 0);
+    const totalSale = items.reduce((sum, item) => sum + (Number(item.total_sale) || (Number(item.unit_sale || 0) * Number(item.quantity || 1))), 0);
 
     const discType = sheetData.discount_type || 'Percentage';
     const discVal = Number(sheetData.discount_value) || 0;
-    const discountAmount = discType === 'Percentage'
-      ? (totalPurchase * (discVal / 100))
-      : discVal;
+    let discountAmount = 0;
+    if (discType === 'Percentage') {
+      discountAmount = totalPurchase * (discVal / 100);
+    } else if (discType === 'Value') {
+      discountAmount = discVal;
+    } else {
+      discountAmount = 0;
+    }
+    discountAmount = Math.min(discountAmount, totalPurchase);
+    const afterDiscount = Math.max(0, totalPurchase - discountAmount);
 
     const consultation = Number(sheetData.consultation_charges) || 0;
     const freight = Number(sheetData.freight_charges) || 0;
 
-    const netPurchase = Math.max(0, (totalPurchase - discountAmount) + consultation + freight);
+    const netPurchase = Math.max(0, afterDiscount + consultation + freight);
     const netProfit = totalSale - netPurchase;
     const marginPercent = totalSale > 0 ? (netProfit / totalSale) * 100 : 0;
 
     return {
-      totalPurchase,
-      totalSale,
-      discountAmount,
-      netPurchase,
-      netProfit,
-      marginPercent,
+      totalPurchase: Number(totalPurchase) || 0,
+      totalSale: Number(totalSale) || 0,
+      discountAmount: Number(discountAmount) || 0,
+      afterDiscount: Number(afterDiscount) || 0,
+      netPurchase: Number(netPurchase) || 0,
+      netProfit: Number(netProfit) || 0,
+      marginPercent: Number(marginPercent) || 0,
     };
   };
 
@@ -172,12 +185,25 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
     const uSale = Number(field === 'unit_sale' ? val : current.unit_sale) || 0;
 
     const totPur = qty * uPur;
-    const totSale = qty * uSale;
-    const margin = totSale > 0 ? ((totSale - totPur) / totSale) * 100 : 0;
+    const subTotal = qty * uSale;
+    const marginVal = subTotal - totPur;
+    const marginPct = subTotal > 0 ? (marginVal / subTotal) * 100 : 0;
 
     current.total_purchase = totPur;
-    current.total_sale = totSale;
-    current.margin_percentage = parseFloat(margin.toFixed(2));
+    current.total_sale = subTotal; // We treat total_sale as sub_total for backwards compatibility and logic
+    current.sub_total = subTotal;
+    current.margin_value = marginVal;
+    current.margin_percentage = parseFloat(marginPct.toFixed(2));
+
+    const taxRateMatch = current.tax_description?.match(/@(\d+(?:\.\d+)?)%/);
+    if (taxRateMatch) {
+      const rate = parseFloat(taxRateMatch[1]);
+      const taxAmt = subTotal * (rate / 100);
+      current.tax_description = current.tax_description?.replace(/:\s*[\d,]+\.\d{2}/, `: ${taxAmt.toFixed(2)}`);
+      current.total = subTotal + taxAmt;
+    } else {
+      current.total = subTotal; // Fallback
+    }
 
     updated[index] = current;
     setSheetData({ ...sheetData, line_items: updated });
@@ -187,24 +213,28 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
     const updated = [
       ...(sheetData.line_items || []),
       {
-        description: 'New Product Item',
-        unit_purchase: 10000,
-        unit_sale: 13000,
+        description: '',
         quantity: 1,
-        total_purchase: 10000,
-        total_sale: 13000,
-        margin_percentage: 23.08,
+        unit_purchase: 0,
+        unit_sale: 0,
+        total_purchase: 0,
+        total_sale: 0,
+        margin_percentage: 0,
+        margin_value: 0,
+        sub_total: 0,
+        total: 0,
       },
     ];
     setSheetData({ ...sheetData, line_items: updated });
   };
 
+  const clearAllLineItems = () => {
+    setSheetData((prev) => ({ ...prev, line_items: [] }));
+    setShowClearConfirm(false);
+  };
+
   const removeLineItem = (index: number) => {
     const updated = [...(sheetData.line_items || [])];
-    if (updated.length <= 1) {
-      alert('A cost sheet must have at least one line item.');
-      return;
-    }
     updated.splice(index, 1);
     setSheetData({ ...sheetData, line_items: updated });
   };
@@ -258,6 +288,10 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
             total_purchase: totPur,
             total_sale: totSale,
             margin_percentage: parseFloat(margin.toFixed(2)),
+            uom: 'Box',
+            margin_value: totSale - totPur,
+            sub_total: totSale,
+            total: totSale,
           };
         });
 
@@ -296,16 +330,36 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
           unit_purchase: item.unit_purchase,
           unit_sale: item.unit_sale,
           quantity: item.quantity,
-          total_purchase: item.total_purchase,
+          total_purchase: item.total_purchase || (item.unit_purchase * item.quantity),
           total_sale: item.total_sale,
           margin_percentage: item.margin_percentage,
+          uom: item.uom || 'Box',
+          margin_value: item.margin_value,
+          sub_total: item.sub_total || item.total_sale,
+          tax_description: item.tax_description,
+          total: item.total,
         }));
 
-        setSheetData({
-          ...sheetData,
-          line_items: [...(sheetData.line_items || []), ...parsedItems],
-        });
-        setSuccessMsg(`PDF parsed successfully! Imported ${parsedItems.length} candidate line items.`);
+        const existingCount = sheetData.line_items?.length || 0;
+        let replace = true;
+        if (existingCount > 0) {
+          try {
+            replace = window.confirm(`Detected ${parsedItems.length} line items in the PDF quote.\n\nClick OK to REPLACE the existing ${existingCount} items.\nClick Cancel to APPEND to existing items.`);
+          } catch {
+            replace = true;
+          }
+        }
+        const updatedList = replace ? parsedItems : [...(sheetData.line_items || []), ...parsedItems];
+
+        setSheetData((prev) => ({
+          ...prev,
+          line_items: updatedList,
+          subject: (res.sheet?.subject && (!prev.subject || prev.subject === 'New Cost Sheet')) ? res.sheet.subject : prev.subject,
+          oem: res.sheet?.oem || prev.oem,
+          distributor: res.sheet?.distributor || prev.distributor,
+          business_unit: res.sheet?.business_unit || prev.business_unit,
+        }));
+        setSuccessMsg(`PDF parsed successfully! Imported ${parsedItems.length} line items.`);
       } else {
         alert('No tabular line items could be detected in this PDF. You may add items manually or via Excel.');
       }
@@ -348,18 +402,17 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
   };
 
   const handleDeleteAttachment = async (fileId: number, fileName: string) => {
-    if (!confirm(`Are you sure you want to delete "${fileName}"?`)) return;
     setDeletingAttachmentId(fileId);
     try {
       await apiRequest(`/api/uploads/attachment/${fileId}`, {
         method: 'DELETE',
       });
-      setSuccessMsg('Attachment deleted successfully.');
+      setSuccessMsg(`Attachment "${fileName}" deleted successfully.`);
       if (fullCostSheet?.id) {
         loadCostSheet(fullCostSheet.id);
       }
     } catch (err: any) {
-      alert('Failed to delete attachment: ' + err.message);
+      setError('Failed to delete attachment: ' + err.message);
     } finally {
       setDeletingAttachmentId(null);
     }
@@ -793,7 +846,7 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
               {/* TAB 2: LINE ITEMS & PROFITABILITY */}
               {activeTab === 'line_items' && (
                 <div className="space-y-6">
-                  {/* Actions Header: Add Product, Excel Import, PDF Parser */}
+                  {/* Actions Header: Add Product, Excel Import, PDF Parser, Delete All */}
                   <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
                     <div className="flex items-center gap-2">
                       <button
@@ -838,6 +891,42 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
                         className="hidden"
                         onChange={handlePdfParserUpload}
                       />
+
+                      {/* Delete All Line Items */}
+                      {sheetData.line_items && sheetData.line_items.length > 0 && (
+                        showClearConfirm ? (
+                          <div className="flex items-center gap-1.5 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1">
+                            <span className="text-xs text-red-700 font-medium">Delete all {sheetData.line_items.length} items?</span>
+                            <button
+                              type="button"
+                              id="btn-confirm-delete-all-items"
+                              onClick={clearAllLineItems}
+                              className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-semibold transition cursor-pointer shadow-sm"
+                            >
+                              Yes, Delete All
+                            </button>
+                            <button
+                              type="button"
+                              id="btn-cancel-delete-all-items"
+                              onClick={() => setShowClearConfirm(false)}
+                              className="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 rounded text-xs font-medium transition cursor-pointer"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            id="btn-delete-all-items"
+                            onClick={() => setShowClearConfirm(true)}
+                            className="px-3 py-1.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                            title="Delete all line items"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                            <span>Delete All Items</span>
+                          </button>
+                        )
+                      )}
                     </div>
 
                     <span className="text-xs text-slate-500">
@@ -845,195 +934,239 @@ export const CostSheetModal: React.FC<CostSheetModalProps> = ({
                     </span>
                   </div>
 
-                  {/* Line Items Table */}
-                  <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-xs">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="bg-slate-800 text-white font-semibold">
-                          <th className="p-2.5 w-10 text-center">#</th>
-                          <th className="p-2.5 min-w-[200px]">Item Description</th>
-                          <th className="p-2.5 w-20 text-center">Qty</th>
-                          <th className="p-2.5 w-32 text-right">Unit Purchase</th>
-                          <th className="p-2.5 w-32 text-right">Total Purchase</th>
-                          <th className="p-2.5 w-32 text-right">Unit Sale</th>
-                          <th className="p-2.5 w-32 text-right">Total Sale</th>
-                          <th className="p-2.5 w-24 text-center">Margin %</th>
-                          <th className="p-2.5 w-12 text-center"></th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200">
-                        {sheetData.line_items?.map((item, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50 transition">
-                            <td className="p-2 text-center text-slate-400 font-bold">{idx + 1}</td>
-                            <td className="p-2">
-                              <input
-                                type="text"
-                                value={item.description}
-                                onChange={(e) => handleLineItemChange(idx, 'description', e.target.value)}
-                                className="w-full text-xs bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none p-1 font-medium"
-                              />
-                            </td>
-                            <td className="p-2">
-                              <input
-                                type="number"
-                                min={1}
-                                value={item.quantity}
-                                onChange={(e) => handleLineItemChange(idx, 'quantity', parseInt(e.target.value, 10) || 1)}
-                                className="w-full text-xs text-center bg-transparent border border-slate-200 rounded p-1"
-                              />
-                            </td>
-                            <td className="p-2">
-                              <input
-                                type="number"
-                                min={0}
-                                value={item.unit_purchase}
-                                onChange={(e) => handleLineItemChange(idx, 'unit_purchase', parseFloat(e.target.value) || 0)}
-                                className="w-full text-xs text-right bg-transparent border border-slate-200 rounded p-1"
-                              />
-                            </td>
-                            <td className="p-2 text-right font-semibold text-slate-700">
-                              ₹{Number(item.total_purchase).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="p-2">
-                              <input
-                                type="number"
-                                min={0}
-                                value={item.unit_sale}
-                                onChange={(e) => handleLineItemChange(idx, 'unit_sale', parseFloat(e.target.value) || 0)}
-                                className="w-full text-xs text-right bg-transparent border border-slate-200 rounded p-1 font-medium text-blue-700"
-                              />
-                            </td>
-                            <td className="p-2 text-right font-bold text-blue-600">
-                              ₹{Number(item.total_sale).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="p-2 text-center">
-                              <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                                item.margin_percentage >= 18 ? 'bg-emerald-100 text-emerald-800' :
-                                item.margin_percentage >= 10 ? 'bg-amber-100 text-amber-800' :
-                                'bg-red-100 text-red-800'
-                              }`}>
-                                {Number(item.margin_percentage).toFixed(2)}%
-                              </span>
-                            </td>
-                            <td className="p-2 text-center">
-                              <button
-                                onClick={() => removeLineItem(idx)}
-                                className="p-1 text-slate-400 hover:text-red-600 rounded transition cursor-pointer"
-                                title="Remove Item"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
+                  {/* Line Items Table or Empty State */}
+                  {(!sheetData.line_items || sheetData.line_items.length === 0) ? (
+                    <div className="py-12 px-4 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+                      <p className="text-slate-700 font-semibold text-xs">No line items in this cost sheet</p>
+                      <p className="text-slate-500 text-[11px] mt-1 max-w-md mx-auto">
+                        Click <strong>Add Line Item</strong> to add items manually, or click <strong>PDF Line Item Importer</strong> to automatically import line items and pricing directly from a vendor PDF quotation.
+                      </p>
+                      <div className="mt-4 flex items-center justify-center gap-2">
+                        <button
+                          onClick={addLineItem}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Add First Item</span>
+                        </button>
+                        <button
+                          onClick={() => pdfInputRef.current?.click()}
+                          className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-purple-600" />
+                          <span>Import from PDF</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-xs">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="bg-slate-800 text-white font-semibold">
+                            <th className="p-2.5 w-10 text-center">#</th>
+                            <th className="p-2.5 min-w-[200px]">Product / Description</th>
+                            <th className="p-2.5 w-32 text-right">Unit Purchase (₹)</th>
+                            <th className="p-2.5 w-32 text-right">Unit Sale (₹)</th>
+                            <th className="p-2.5 w-20 text-center">Qty</th>
+                            <th className="p-2.5 w-32 text-right">Total Purchase (₹)</th>
+                            <th className="p-2.5 w-32 text-right">Total Sale (₹)</th>
+                            <th className="p-2.5 w-24 text-center">Margin %</th>
+                            <th className="p-2.5 w-10 text-center">Del</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          {sheetData.line_items.map((item, idx) => {
+                            const marginNum = Number(item.margin_percentage) || 0;
+                            const marginClass =
+                              marginNum >= 15
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : marginNum >= 8
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-red-50 text-red-700 border-red-200';
 
-                  {/* Commercial Add-ons and Discounts Controls */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
-                    {/* Discount Control */}
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Vendor / Deal Discount
-                      </label>
-                      <div className="flex gap-2">
+                            const itemUnitPur = Number(item.unit_purchase) || 0;
+                            const itemUnitSale = Number(item.unit_sale) || 0;
+                            const itemQty = Number(item.quantity) || 1;
+                            const itemTotPur = Number(item.total_purchase) || (itemUnitPur * itemQty);
+                            const itemTotSale = Number(item.total_sale) || (itemUnitSale * itemQty);
+
+                            return (
+                              <tr key={idx} className="hover:bg-slate-50 transition">
+                                <td className="p-2 text-center text-slate-400 font-bold">{idx + 1}</td>
+                                <td className="p-2">
+                                  <textarea
+                                    rows={2}
+                                    placeholder="Item description"
+                                    value={item.description || ''}
+                                    onChange={(e) => handleLineItemChange(idx, 'description', e.target.value)}
+                                    className="w-full text-xs bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none p-1 font-medium resize-y"
+                                  />
+                                  {(item.uom || item.tax_description) && (
+                                    <div className="flex gap-2 text-[10px] text-slate-400 px-1 mt-0.5">
+                                      {item.uom && <span>UOM: <strong className="text-slate-600">{item.uom}</strong></span>}
+                                      {item.tax_description && <span>Tax: <strong className="text-slate-600">{item.tax_description}</strong></span>}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="p-2">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    placeholder="0"
+                                    value={item.unit_purchase !== undefined && item.unit_purchase !== null ? item.unit_purchase : ''}
+                                    onChange={(e) => handleLineItemChange(idx, 'unit_purchase', parseFloat(e.target.value) || 0)}
+                                    className="w-full text-xs text-right bg-white border border-slate-200 rounded p-1.5 focus:border-blue-500 focus:outline-none font-medium"
+                                  />
+                                </td>
+                                <td className="p-2">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    placeholder="0"
+                                    value={item.unit_sale !== undefined && item.unit_sale !== null ? item.unit_sale : ''}
+                                    onChange={(e) => handleLineItemChange(idx, 'unit_sale', parseFloat(e.target.value) || 0)}
+                                    className="w-full text-xs text-right bg-white border border-slate-200 rounded p-1.5 focus:border-blue-500 focus:outline-none font-medium text-blue-700"
+                                  />
+                                </td>
+                                <td className="p-2">
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    placeholder="1"
+                                    value={item.quantity !== undefined && item.quantity !== null ? item.quantity : 1}
+                                    onChange={(e) => handleLineItemChange(idx, 'quantity', parseFloat(e.target.value) || 1)}
+                                    className="w-full text-xs text-center bg-white border border-slate-200 rounded p-1.5 focus:border-blue-500 focus:outline-none font-semibold"
+                                  />
+                                </td>
+                                <td className="p-2 text-right font-medium text-slate-700">
+                                  ₹{itemTotPur.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-2 text-right font-semibold text-blue-800">
+                                  ₹{itemTotSale.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                                <td className="p-2 text-center">
+                                  <span className={`inline-block px-2 py-0.5 text-[11px] font-bold rounded border ${marginClass}`}>
+                                    {marginNum.toFixed(2)}%
+                                  </span>
+                                </td>
+                                <td className="p-2 text-center">
+                                  <button
+                                    onClick={() => removeLineItem(idx)}
+                                    className="p-1 text-slate-400 hover:text-red-600 rounded transition cursor-pointer"
+                                    title="Remove item"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* DISCOUNT SECTION */}
+                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                    <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Overall Discount (on Purchase Price)</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Discount Type</label>
                         <select
                           value={sheetData.discount_type || 'Percentage'}
                           onChange={(e) => setSheetData({ ...sheetData, discount_type: e.target.value as any })}
-                          className="text-xs bg-white border border-slate-300 rounded-lg p-2 focus:ring-1 focus:ring-blue-500"
+                          className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2 focus:ring-1 focus:ring-blue-500"
                         >
-                          <option value="Percentage">% Percent</option>
-                          <option value="Value">₹ Fixed Value</option>
+                          <option value="none">No Discount</option>
+                          <option value="Percentage">Percentage (%)</option>
+                          <option value="Value">Fixed Value (₹)</option>
                         </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Discount Value</label>
                         <input
                           type="number"
                           min={0}
                           value={sheetData.discount_value || 0}
                           onChange={(e) => setSheetData({ ...sheetData, discount_value: parseFloat(e.target.value) || 0 })}
                           className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2 text-right focus:ring-1 focus:ring-blue-500"
+                          placeholder="0"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Discount Amount (₹)</label>
+                        <div className="w-full text-xs bg-red-50 border border-red-200 text-red-600 font-bold rounded-lg p-2 text-right">
+                          -₹{totals.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Net Purchase After Discount (₹)</label>
+                        <div className="w-full text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold rounded-lg p-2 text-right">
+                          ₹{totals.afterDiscount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Consultation Charges (₹) — added after discount</label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={sheetData.consultation_charges || 0}
+                          onChange={(e) => setSheetData({ ...sheetData, consultation_charges: parseFloat(e.target.value) || 0 })}
+                          className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2 text-right focus:ring-1 focus:ring-blue-500"
+                          placeholder="0"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Freight Charges (₹)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={sheetData.freight_charges || 0}
+                          onChange={(e) => setSheetData({ ...sheetData, freight_charges: parseFloat(e.target.value) || 0 })}
+                          className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2 text-right focus:ring-1 focus:ring-blue-500"
+                          placeholder="0"
                         />
                       </div>
                     </div>
-
-                    {/* Consultation Charges */}
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Consultation / Engineering Charges (₹)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={sheetData.consultation_charges || 0}
-                        onChange={(e) => setSheetData({ ...sheetData, consultation_charges: parseFloat(e.target.value) || 0 })}
-                        className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2 text-right focus:ring-1 focus:ring-blue-500"
-                      />
-                    </div>
-
-                    {/* Freight Charges */}
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Freight & Shipping Charges (₹)
-                      </label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={sheetData.freight_charges || 0}
-                        onChange={(e) => setSheetData({ ...sheetData, freight_charges: parseFloat(e.target.value) || 0 })}
-                        className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2 text-right focus:ring-1 focus:ring-blue-500"
-                      />
-                    </div>
                   </div>
 
-                  {/* Live Profitability Calculation Summary Card */}
-                  <div className="p-4 bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-xl shadow-lg">
-                    <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3">
-                      Commercial Profitability Breakdown
-                    </h4>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 text-xs">
-                      <div>
-                        <span className="text-slate-400 block text-[11px]">Sum of Purchase:</span>
-                        <span className="font-semibold text-slate-200">
-                          ₹{totals.totalPurchase.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </span>
+                  {/* SUMMARY TOTALS */}
+                  <div className="flex justify-end">
+                    <div className="w-full max-w-md bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-2 text-xs">
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-600">Total Purchase</span>
+                        <span className="font-semibold text-slate-900">₹{totals.totalPurchase.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                       </div>
-
-                      <div>
-                        <span className="text-slate-400 block text-[11px]">Discount:</span>
-                        <span className="font-semibold text-red-400">
-                          - ₹{totals.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </span>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-600">Discount on Purchase</span>
+                        <span className="font-semibold text-red-600">-₹{totals.discountAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                       </div>
-
-                      <div>
-                        <span className="text-slate-400 block text-[11px]">Consult + Freight:</span>
-                        <span className="font-semibold text-slate-200">
-                          + ₹{((sheetData.consultation_charges || 0) + (sheetData.freight_charges || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </span>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-600">Consultation Charges</span>
+                        <span className="font-semibold text-slate-900">+₹{(sheetData.consultation_charges || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                       </div>
-
-                      <div className="border-l border-slate-700 pl-3">
-                        <span className="text-slate-400 block text-[11px]">Net Purchase Cost:</span>
-                        <span className="font-bold text-amber-300">
-                          ₹{totals.netPurchase.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </span>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-600">Freight Charges</span>
+                        <span className="font-semibold text-slate-900">+₹{(sheetData.freight_charges || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                       </div>
-
-                      <div>
-                        <span className="text-slate-400 block text-[11px]">Total Sale (Deal Value):</span>
-                        <span className="font-bold text-blue-400">
-                          ₹{totals.totalSale.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </span>
+                      <div className="flex justify-between py-2 px-2.5 bg-slate-50 rounded-lg font-bold border border-slate-200">
+                        <span className="text-slate-800">Final Purchase</span>
+                        <span className="text-amber-700">₹{totals.netPurchase.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                       </div>
-
-                      <div className="bg-slate-800/80 p-2 rounded-lg border border-slate-700">
-                        <span className="text-slate-300 block text-[10px] font-semibold">Net Profit / Margin:</span>
-                        <span className="text-base font-extrabold text-emerald-400 block">
-                          ₹{totals.netProfit.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                        </span>
-                        <span className="text-xs font-bold text-emerald-300">
-                          {totals.marginPercent.toFixed(2)}% Margin
-                        </span>
+                      <div className="flex justify-between py-1 border-b border-slate-100">
+                        <span className="text-slate-600">Total Selling</span>
+                        <span className="font-semibold text-blue-700">₹{totals.totalSale.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      <div className="flex justify-between py-2 px-2.5 bg-emerald-50 rounded-lg font-bold border border-emerald-200 text-emerald-800">
+                        <span className="flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5 text-emerald-600" /> Overall Margin</span>
+                        <span className="text-base text-emerald-700">₹{totals.netProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      <div className="flex justify-between py-1.5 px-2.5 bg-emerald-100/60 rounded-lg font-bold text-emerald-900">
+                        <span className="flex items-center gap-1.5"><Percent className="w-3.5 h-3.5 text-emerald-600" /> Overall Margin %</span>
+                        <span className="text-emerald-700">{totals.marginPercent.toFixed(2)}%</span>
                       </div>
                     </div>
                   </div>

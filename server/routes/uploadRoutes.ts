@@ -13,9 +13,9 @@ const router = Router();
 
 router.use(verifyJWT);
 
-router.post('/attachment', upload.single('file'), uploadCostSheetAttachment);
+router.post('/attachment', upload.single('file') as any, uploadCostSheetAttachment);
 router.delete('/attachment/:id', deleteCostSheetAttachment);
-router.post('/parse-pdf-lines', upload.single('file'), parsePdfForLineItems);
+router.post('/parse-pdf-lines', upload.single('file') as any, parsePdfForLineItems);
 router.get('/notifications', getNotifications);
 router.post('/notifications/:id/read', markNotificationRead);
 

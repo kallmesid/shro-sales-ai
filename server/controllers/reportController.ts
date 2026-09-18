@@ -125,17 +125,30 @@ export async function getDashboardStats(req: AuthRequest, res: Response) {
         COALESCE(SUM(cs.total_sale), 0) as total_deal_value,
         COALESCE(SUM(cs.total_purchase), 0) as total_purchase,
         COALESCE(SUM(cs.net_profit), 0) as total_profit,
-        COALESCE(AVG(cs.margin_percentage), 0) as avg_margin
+        COALESCE(AVG(cs.margin_percentage), 0) as avg_margin,
+        COUNT(CASE WHEN cs.status = 'Draft' THEN 1 END) as draft_count,
+        COUNT(CASE WHEN cs.status = 'Pending' THEN 1 END) as pending_count,
+        COUNT(CASE WHEN cs.status = 'Approved' THEN 1 END) as approved_count,
+        COUNT(CASE WHEN cs.status = 'Rejected' THEN 1 END) as rejected_count
       FROM cost_sheets cs
       ${whereClause}
     `, params);
 
+    const totalDealVal = parseFloat(kpiRes.rows[0]?.total_deal_value || '0');
+    const totalProf = parseFloat(kpiRes.rows[0]?.total_profit || '0');
+    const overallMargin = totalDealVal > 0 ? (totalProf / totalDealVal) * 100 : 0;
+
     const kpis = {
       total_count: parseInt(kpiRes.rows[0]?.total_count || '0', 10),
-      total_deal_value: parseFloat(kpiRes.rows[0]?.total_deal_value || '0'),
+      total_deal_value: totalDealVal,
       total_purchase: parseFloat(kpiRes.rows[0]?.total_purchase || '0'),
-      total_profit: parseFloat(kpiRes.rows[0]?.total_profit || '0'),
+      total_profit: totalProf,
       avg_margin: parseFloat(parseFloat(kpiRes.rows[0]?.avg_margin || '0').toFixed(2)),
+      overall_margin: parseFloat(overallMargin.toFixed(2)),
+      draft_count: parseInt(kpiRes.rows[0]?.draft_count || '0', 10),
+      pending_count: parseInt(kpiRes.rows[0]?.pending_count || '0', 10),
+      approved_count: parseInt(kpiRes.rows[0]?.approved_count || '0', 10),
+      rejected_count: parseInt(kpiRes.rows[0]?.rejected_count || '0', 10),
     };
 
     // Monthly Profit Trend
@@ -182,6 +195,20 @@ export async function getDashboardStats(req: AuthRequest, res: Response) {
       GROUP BY cs.status
     `, params);
 
+    // Business Unit Distribution
+    const buRes = await query(`
+      SELECT 
+        COALESCE(NULLIF(cs.business_unit, ''), 'Other') as business_unit,
+        COUNT(cs.id) as count,
+        COALESCE(SUM(cs.total_sale), 0) as total_sale,
+        COALESCE(SUM(cs.net_profit), 0) as total_profit
+      FROM cost_sheets cs
+      ${whereClause}
+      GROUP BY cs.business_unit
+      ORDER BY total_sale DESC
+      LIMIT 8
+    `, params);
+
     // OEM Distribution
     const oemRes = await query(`
       SELECT 
@@ -192,7 +219,7 @@ export async function getDashboardStats(req: AuthRequest, res: Response) {
       ${whereClause}
       GROUP BY cs.oem
       ORDER BY total_sale DESC
-      LIMIT 6
+      LIMIT 8
     `, params);
 
     // Top Customer Accounts
@@ -201,13 +228,46 @@ export async function getDashboardStats(req: AuthRequest, res: Response) {
         COALESCE(acc.name, 'Direct Client') as account_name,
         COUNT(cs.id) as deal_count,
         COALESCE(SUM(cs.total_sale), 0) as total_value,
+        COALESCE(SUM(cs.net_profit), 0) as total_profit,
         COALESCE(AVG(cs.margin_percentage), 0) as avg_margin
       FROM cost_sheets cs
       LEFT JOIN accounts acc ON cs.account_id = acc.id
       ${whereClause}
       GROUP BY acc.name
       ORDER BY total_value DESC
-      LIMIT 6
+      LIMIT 8
+    `, params);
+
+    // Performance by User (Comprehensive across Sales, Initiator, and Approval responsibilities)
+    const userPerfRes = await query(`
+      WITH filtered_cs AS (
+        SELECT * FROM cost_sheets cs
+        ${whereClause}
+      )
+      SELECT 
+        u.id as user_id,
+        u.name as user_name,
+        COALESCE(u.role, 'Sales') as dept_role,
+        u.access_level,
+        COUNT(fcs.id) as total_count,
+        COUNT(CASE WHEN fcs.status = 'Draft' THEN 1 END) as draft_count,
+        COUNT(CASE WHEN fcs.status = 'Pending' THEN 1 END) as pending_count,
+        COUNT(CASE WHEN fcs.status = 'Approved' THEN 1 END) as approved_count,
+        COUNT(CASE WHEN fcs.status = 'Rejected' THEN 1 END) as rejected_count,
+        COALESCE(SUM(fcs.total_sale), 0) as total_sale,
+        COALESCE(SUM(fcs.net_profit), 0) as total_profit,
+        COALESCE(AVG(fcs.margin_percentage), 0) as avg_margin,
+        COALESCE((
+          SELECT COUNT(p.id) 
+          FROM cost_sheets p 
+          WHERE p.status = 'Pending' 
+            AND (p.assigned_approvers->>p.current_stage::text)::int = u.id
+        ), 0) as awaiting_approval_count
+      FROM users u
+      LEFT JOIN filtered_cs fcs ON (fcs.salesperson_id = u.id OR fcs.initiator_id = u.id)
+      WHERE u.status = 'Active'
+      GROUP BY u.id, u.name, u.role, u.access_level
+      ORDER BY total_sale DESC, total_count DESC
     `, params);
 
     // Recent Cost Sheets with all fields
@@ -229,8 +289,10 @@ export async function getDashboardStats(req: AuthRequest, res: Response) {
       monthly_trend: trendRes.rows,
       salesperson_performance: salesRes.rows,
       status_distribution: statusRes.rows,
+      business_unit_distribution: buRes.rows,
       oem_distribution: oemRes.rows,
       top_accounts: topAccountsRes.rows,
+      user_performance: userPerfRes.rows,
       recent_sheets: recentRes.rows
     });
   } catch (error) {
@@ -259,12 +321,27 @@ export async function getDrilldownInsights(req: AuthRequest, res: Response) {
     } else if (panel === 'approved_deals') {
       specificWhere += ` AND cs.status = 'Approved'`;
       sheetsOrderBy = 'cs.total_sale DESC';
+    } else if (panel === 'draft_deals') {
+      specificWhere += ` AND cs.status = 'Draft'`;
+      sheetsOrderBy = 'cs.created_at DESC';
+    } else if (panel === 'rejected_deals') {
+      specificWhere += ` AND cs.status = 'Rejected'`;
+      sheetsOrderBy = 'cs.created_at DESC';
     } else if (panel === 'gross_deal_value') {
       sheetsOrderBy = 'cs.total_sale DESC';
     } else if (panel === 'net_profit') {
       sheetsOrderBy = 'cs.net_profit DESC';
     } else if (panel === 'average_margin') {
       sheetsOrderBy = 'cs.margin_percentage ASC'; // show critical margins first
+    } else if (panel === 'business_unit_distribution' && target_name && target_name !== 'All') {
+      specificWhere += ` AND cs.business_unit = $${nextIndex++}`;
+      specificParams.push(target_name);
+      sheetsOrderBy = 'cs.total_sale DESC';
+    } else if (panel === 'user_performance' && target_id && target_id !== 'All') {
+      specificWhere += ` AND (cs.salesperson_id = $${nextIndex} OR cs.initiator_id = $${nextIndex})`;
+      specificParams.push(parseInt(target_id as string, 10));
+      nextIndex++;
+      sheetsOrderBy = 'cs.created_at DESC';
     } else if (panel === 'oem_distribution' && target_name && target_name !== 'All') {
       specificWhere += ` AND cs.oem = $${nextIndex++}`;
       specificParams.push(target_name);
@@ -510,6 +587,40 @@ export async function getDrilldownInsights(req: AuthRequest, res: Response) {
         title: 'Sales Representative Performance & Leaderboard',
         subtitle: 'Deal generation, approval progression, and profit contribution per executive.',
         rep_matrix: repMatrixRes.rows,
+      };
+    } else if (panel === 'draft_deals') {
+      insightsData = {
+        title: 'Draft Cost Sheets Directory',
+        subtitle: 'Unsubmitted quotes currently in progress by sales representatives before formal workflow submission.',
+      };
+    } else if (panel === 'rejected_deals') {
+      insightsData = {
+        title: 'Rejected Quotations & Commercial Review Log',
+        subtitle: 'Quotes that were rejected during sequential validation, along with margin and reason records.',
+      };
+    } else if (panel === 'business_unit_distribution') {
+      const buFullRes = await query(`
+        SELECT 
+          COALESCE(NULLIF(cs.business_unit, ''), 'Other') as business_unit,
+          COUNT(cs.id) as count,
+          COALESCE(SUM(cs.total_sale), 0) as total_sale,
+          COALESCE(SUM(cs.net_profit), 0) as total_profit,
+          COALESCE(AVG(cs.margin_percentage), 0) as avg_margin
+        FROM cost_sheets cs
+        ${whereClause}
+        GROUP BY cs.business_unit
+        ORDER BY total_sale DESC
+      `, params);
+
+      insightsData = {
+        title: 'Business Unit Revenue & Margin Contribution',
+        subtitle: 'Comprehensive financial performance across organizational business divisions.',
+        bu_matrix: buFullRes.rows,
+      };
+    } else if (panel === 'user_performance') {
+      insightsData = {
+        title: target_name ? `Performance Dossier: ${target_name}` : 'Individual User Performance & Workflow Queue',
+        subtitle: 'Cost sheets created, total revenue yield, profit contribution, and pending workflow sign-off queue.',
       };
     } else if (panel === 'top_accounts') {
       const accountMatrixRes = await query(`

@@ -7,3 +7,12 @@ coverage/
 .env*
 !.env.example
 podman-compose.demo.local.yml
+
+data/postgres/
+uploads/
+
+data/postgres/
+uploads/
+
+data/postgres/
+uploads/

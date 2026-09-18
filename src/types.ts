@@ -41,6 +41,11 @@ export interface LineItem {
   total_purchase: number;
   total_sale: number;
   margin_percentage: number;
+  uom?: string;
+  margin_value?: number;
+  sub_total?: number;
+  tax_description?: string;
+  total?: number;
 }
 
 export interface ApprovalLog {
@@ -88,7 +93,7 @@ export interface CostSheet {
   business_unit?: string;
   oem?: string;
   currency: string;
-  discount_type: 'Percentage' | 'Value';
+  discount_type: 'Percentage' | 'Value' | 'none';
   discount_value: number;
   consultation_charges: number;
   freight_charges: number;
@@ -124,6 +129,7 @@ export interface Team {
   name: string;
   lead_id?: number;
   lead_name?: string;
+  member_count?: number;
   members?: { team_id: number; user_id: number; name: string; role: string; access_level: string }[];
 }
 
