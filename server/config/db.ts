@@ -109,17 +109,17 @@ export async function initDb() {
 
     CREATE TABLE IF NOT EXISTS cost_sheets (
       id SERIAL PRIMARY KEY,
-      cs_number VARCHAR(255) UNIQUE NOT NULL,
+      cs_number VARCHAR(100) UNIQUE NOT NULL,
       status VARCHAR(50) NOT NULL DEFAULT 'Draft',
-      subject TEXT NOT NULL,
+      subject VARCHAR(255) NOT NULL,
       initiator_id INTEGER REFERENCES users(id) ON DELETE RESTRICT,
       salesperson_id INTEGER REFERENCES users(id) ON DELETE RESTRICT,
       account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
-      distributor TEXT,
-      business_unit TEXT,
-      oem TEXT,
-      currency VARCHAR(20) DEFAULT 'INR',
-      discount_type VARCHAR(50) DEFAULT 'Percentage',
+      distributor VARCHAR(100),
+      business_unit VARCHAR(100),
+      oem VARCHAR(100),
+      currency VARCHAR(10) DEFAULT 'INR',
+      discount_type VARCHAR(20) DEFAULT 'Percentage',
       discount_value NUMERIC(15,2) DEFAULT 0.00,
       consultation_charges NUMERIC(15,2) DEFAULT 0.00,
       freight_charges NUMERIC(15,2) DEFAULT 0.00,
@@ -197,36 +197,6 @@ export async function initDb() {
     await pgPool.query(schemaSql);
   } else if (pgliteInstance) {
     await pgliteInstance.exec(schemaSql);
-  }
-
-  // Schema migrations for existing databases to prevent VARCHAR length errors
-  const columnMigrations = [
-    'ALTER TABLE cost_sheets ALTER COLUMN distributor TYPE TEXT',
-    'ALTER TABLE cost_sheets ALTER COLUMN business_unit TYPE TEXT',
-    'ALTER TABLE cost_sheets ALTER COLUMN oem TYPE TEXT',
-    'ALTER TABLE cost_sheets ALTER COLUMN subject TYPE TEXT',
-    'ALTER TABLE cost_sheets ALTER COLUMN cs_number TYPE TEXT',
-    'ALTER TABLE cost_sheets ALTER COLUMN discount_type TYPE TEXT',
-    'ALTER TABLE cost_sheets ALTER COLUMN currency TYPE TEXT',
-    'ALTER TABLE cost_sheets ALTER COLUMN status TYPE TEXT',
-    'ALTER TABLE accounts ALTER COLUMN industry TYPE TEXT',
-    'ALTER TABLE accounts ALTER COLUMN phone TYPE TEXT',
-    'ALTER TABLE accounts ALTER COLUMN name TYPE TEXT',
-    'ALTER TABLE accounts ALTER COLUMN email TYPE TEXT',
-    'ALTER TABLE dropdown_options ALTER COLUMN name TYPE TEXT',
-    'ALTER TABLE approval_logs ALTER COLUMN stage_name TYPE TEXT',
-  ];
-
-  for (const alterSql of columnMigrations) {
-    try {
-      if (pgPool) {
-        await pgPool.query(alterSql);
-      } else if (pgliteInstance) {
-        await pgliteInstance.exec(alterSql);
-      }
-    } catch (e) {
-      // Ignore if table/column already altered or doesn't support
-    }
   }
 
   // Seed default branding if not present

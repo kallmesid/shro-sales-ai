@@ -21,10 +21,7 @@ import {
   ChevronRight,
   Sparkles,
   RefreshCw,
-  SlidersHorizontal,
-  FileEdit,
-  XCircle,
-  Briefcase
+  SlidersHorizontal
 } from 'lucide-react';
 import { apiRequest } from '../lib/api.ts';
 
@@ -34,15 +31,11 @@ export type DrilldownPanelType =
   | 'average_margin'
   | 'pending_approvals'
   | 'approved_deals'
-  | 'draft_deals'
-  | 'rejected_deals'
   | 'monthly_trend'
   | 'status_distribution'
-  | 'business_unit_distribution'
   | 'oem_distribution'
   | 'salesperson_performance'
   | 'top_accounts'
-  | 'user_performance'
   | 'recent_quotes';
 
 interface DashboardInsightsModalProps {
@@ -104,10 +97,6 @@ export const DashboardInsightsModal: React.FC<DashboardInsightsModalProps> = ({
       case 'oem_distribution': return <Tag className="w-5 h-5 text-orange-600" />;
       case 'salesperson_performance': return <Users className="w-5 h-5 text-cyan-600" />;
       case 'top_accounts': return <Building2 className="w-5 h-5 text-indigo-600" />;
-      case 'draft_deals': return <FileEdit className="w-5 h-5 text-slate-600" />;
-      case 'rejected_deals': return <XCircle className="w-5 h-5 text-rose-600" />;
-      case 'business_unit_distribution': return <Briefcase className="w-5 h-5 text-indigo-600" />;
-      case 'user_performance': return <Users className="w-5 h-5 text-cyan-600" />;
       default: return <Layers className="w-5 h-5 text-slate-600" />;
     }
   };

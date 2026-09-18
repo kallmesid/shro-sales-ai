@@ -42,7 +42,6 @@ export const CostSheetsList: React.FC<CostSheetsListProps> = ({
   const [buFilter, setBuFilter] = useState('All');
   const [salespersonFilter, setSalespersonFilter] = useState('All');
   const [onlyMyPending, setOnlyMyPending] = useState(false);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const fetchCostSheets = async () => {
     setLoading(true);
@@ -62,13 +61,14 @@ export const CostSheetsList: React.FC<CostSheetsListProps> = ({
 
   const handleDelete = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!confirm('Are you sure you want to delete this cost sheet? This action cannot be undone.')) {
+      return;
+    }
     try {
       await apiRequest(`/api/cost-sheets/${id}`, { method: 'DELETE' });
       setCostSheets(prev => prev.filter(cs => cs.id !== id));
-      setDeletingId(null);
     } catch (err: any) {
-      console.error('Failed to delete cost sheet:', err);
-      setDeletingId(null);
+      alert(err.message || 'Failed to delete cost sheet');
     }
   };
 
@@ -345,33 +345,13 @@ export const CostSheetsList: React.FC<CostSheetsListProps> = ({
 
                           {/* Delete (Draft or Admin) */}
                           {(cs.status === 'Draft' || currentUser.access_level === 'Admin') && (
-                            deletingId === cs.id ? (
-                              <div className="flex items-center gap-1 bg-red-50 p-1 rounded border border-red-200" onClick={(e) => e.stopPropagation()}>
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleDelete(cs.id, e)}
-                                  className="px-1.5 py-0.5 bg-red-600 text-white rounded text-[10px] font-bold hover:bg-red-700"
-                                >
-                                  Delete
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); setDeletingId(null); }}
-                                  className="px-1.5 py-0.5 bg-slate-200 text-slate-700 rounded text-[10px] hover:bg-slate-300"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); setDeletingId(cs.id); }}
-                                title="Delete Cost Sheet"
-                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition cursor-pointer"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )
+                            <button
+                              onClick={(e) => handleDelete(cs.id, e)}
+                              title="Delete Cost Sheet"
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           )}
                         </div>
                       </td>

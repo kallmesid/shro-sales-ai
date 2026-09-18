@@ -16,9 +16,9 @@ router.use(verifyJWT);
 router.get('/export', exportBackup);
 
 // Inspect an uploaded .zip archive (dry run inspection)
-router.post('/inspect', backupUpload.single('file') as unknown as express.RequestHandler, inspectBackup);
+router.post('/inspect', backupUpload.single('file'), inspectBackup);
 
 // Restore database and files from an uploaded .zip archive
-router.post('/restore', backupUpload.single('file') as unknown as express.RequestHandler, restoreBackup);
+router.post('/restore', backupUpload.single('file'), restoreBackup);
 
 export default router;
